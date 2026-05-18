@@ -1,10 +1,10 @@
-# AI Speech-to-Text
+# AI Speech-to-Text 🎙️
 
 AI Speech-to-Text is a Decky Loader plugin for Steam Deck that records voice, sends the audio to a configurable AI transcription endpoint, and inserts the resulting text into the active game or app.
 
 It is designed for push-to-talk use in Gaming Mode, with per-game profiles for button combos, Enter behavior, and transcription provider/model selection.
 
-## Features
+## Features ✨
 
 - Push-to-talk recording from a two-button controller combo.
 - Manual recording controls from the Decky sidebar.
@@ -17,9 +17,9 @@ It is designed for push-to-talk use in Gaming Mode, with per-game profiles for b
 - Bundled command-line tools under `bin/` to reduce external dependencies.
 - Vendored `evdev` Python module under `py_modules/` for controller input.
 
-## Installation
+## Installation 📦
 
-### Recommended: Install from ZIP in Decky Loader
+### Recommended: Install from ZIP in Decky Loader ✅
 
 1) Download the plugin ZIP from GitHub to your Steam Deck (for example into `~/Downloads`).
 
@@ -31,14 +31,14 @@ It is designed for push-to-talk use in Gaming Mode, with per-game profiles for b
 
 5) Open the Decky Loader sidebar and verify that **AI Speech-to-Text** appears.
 
-### Alternative: Manual install by copying the extracted plugin folder
+### Alternative: Manual install by copying the extracted plugin folder 🛠️
 
 ```bash
 cp -r /path/to/extracted/ai-speech-to-text /home/deck/homebrew/plugins/ai-speech-to-text
 sudo systemctl restart plugin_loader.service
 ```
 
-## First Setup
+## First Setup 🚀
 
 1. Open the installed plugin folder:
 
@@ -58,7 +58,7 @@ nano config/transcription_profiles.json
 
 5. Open the plugin from Decky and enable it.
 
-## Transcription Profiles
+## Transcription Profiles 🧠
 
 Provider and model definitions live in:
 
@@ -74,7 +74,7 @@ config/transcription_profiles.json
 
 The template intentionally does not include API keys.
 
-### JSON Format
+### JSON Format 📄
 
 `profiles` is a list. Each item defines one selectable provider/model profile:
 
@@ -109,7 +109,7 @@ The template intentionally does not include API keys.
 }
 ```
 
-### Fields
+### Fields 🏷️
 
 - `name`: Required. This is what appears in the plugin selector.
 - `provider`: Optional label used in the UI and logs. It does not control routing.
@@ -122,17 +122,17 @@ The backend is dynamic: it does not hard-code provider routing. It sends the req
 
 Most providers use OpenAI-compatible multipart uploads. OpenRouter is handled automatically with JSON + base64 `input_audio`.
 
-## Using The Plugin
+## Using The Plugin 🎮
 
 Open **AI Speech-to-Text** from Decky.
 
-### Main Toggle
+### Main Toggle 🔘
 
 Enable or disable the plugin with **Enabled**.
 
 When enabled, the controller listener starts and watches for the selected push-to-talk combo.
 
-### Push-To-Talk
+### Push-To-Talk 🎤
 
 The plugin uses two buttons as a push-to-talk combo:
 
@@ -146,13 +146,13 @@ Available buttons:
 L1, R1, L2, R2, L3, R3, A, B, X, Y, DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT
 ```
 
-### Provider / Model
+### Provider / Model 🤖
 
 The **Provider / model** dropdown lists the profiles from `config/transcription_profiles.json`.
 
 Selecting a profile changes the transcription endpoint/model used by the current global or per-game profile.
 
-### Enter Mode
+### Enter Mode ⌨️
 
 The **Enter mode** dropdown controls whether the plugin presses Enter around inserted text:
 
@@ -162,7 +162,7 @@ The **Enter mode** dropdown controls whether the plugin presses Enter around ins
 
 This is useful because different games handle chat boxes differently.
 
-## Per-Game Profiles
+## Per-Game Profiles 🕹️
 
 The plugin automatically detects the active Steam app when possible.
 
@@ -181,7 +181,7 @@ Button/profile settings are stored in:
 /home/deck/homebrew/plugins/ai-speech-to-text/config/decky_button_config.json
 ```
 
-## Text Insertion
+## Text Insertion 📝
 
 The plugin tries several insertion methods to work across SteamOS, Gamescope, Proton/Wine games, and desktop apps.
 
@@ -189,7 +189,7 @@ For Unicode text, accents, inverted punctuation, and non-ASCII characters, it pr
 
 This is why transcribed Spanish text with accents can work even when direct keyboard emulation would lose characters due to keyboard layout limitations.
 
-## Bundled Tools
+## Bundled Tools 🧰
 
 The plugin includes helper binaries under `bin/`:
 
@@ -211,7 +211,7 @@ The backend prefers these bundled tools and falls back to system tools when need
 
 The controller listener uses vendored Python `evdev` from `py_modules/`.
 
-## Logs
+## Logs 📜
 
 The main plugin log writes to:
 
@@ -236,9 +236,9 @@ The log includes:
 - insertion backend
 - HTTP/transcription errors
 
-## Troubleshooting
+## Troubleshooting 🧪
 
-### Restart services
+### Restart services 🔄
 
 Restart Decky Loader:
 
@@ -252,7 +252,7 @@ Restart Steam client if needed:
 sudo systemctl restart steam
 ```
 
-### Basic checks
+### Basic checks 🔍
 
 Check that the plugin path exists:
 
@@ -267,7 +267,7 @@ Check that button config and transcription profiles exist:
 /home/deck/homebrew/plugins/ai-speech-to-text/config/transcription_profiles.json
 ```
 
-### Logs
+### Logs 📋
 
 Follow plugin logs:
 
@@ -281,7 +281,7 @@ Follow plugin loader logs:
 journalctl -u plugin_loader.service -n 200 --no-pager
 ```
 
-## Development
+## Development 👨‍💻
 
 Install frontend dependencies:
 
@@ -315,7 +315,7 @@ py_modules/                     Vendored Python modules
 plugin.json                     Decky metadata
 ```
 
-## Notes For Publishing
+## Notes For Publishing 📌
 
 - Do not commit real API keys.
 - Keep `config/transcription_profiles.json` as a template with empty `api_key` values.
@@ -323,6 +323,6 @@ plugin.json                     Decky metadata
 - `node_modules/` should not be committed; `package.json` and `package-lock.json` are enough for development.
 - The `bin/` and `py_modules/` folders are intentionally included because the plugin is designed to be self-contained.
 
-## Author
+## Author 👤
 
 - GitHub: [@cristorrian](https://github.com/cristorrian)
