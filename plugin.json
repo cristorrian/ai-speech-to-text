@@ -1,0 +1,11 @@
+{
+  "name": "AI Speech-to-Text",
+  "version": "0.1.0",
+  "author": "deck",
+  "flags": ["debug"],
+  "publish": {
+    "tags": ["voice", "dictation", "decky", "steam-deck", "accessibility"],
+    "description": "Push-to-talk AI speech-to-text for Steam Deck with configurable transcription providers.",
+    "image": ""
+  }
+}
