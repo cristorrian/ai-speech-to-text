@@ -18,6 +18,14 @@ need_cmd() {
   fi
 }
 
+run_root() {
+  if [[ "${EUID}" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
 if command -v curl >/dev/null 2>&1; then
   DL_CMD="curl"
 elif command -v wget >/dev/null 2>&1; then
@@ -35,8 +43,6 @@ else
   echo "Missing extractor. Install unzip or bsdtar." >&2
   exit 1
 fi
-
-need_cmd sudo
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -73,15 +79,20 @@ for required in plugin.json package.json main.py dist; do
 done
 
 echo "Installing to ${PLUGIN_DEST}"
-sudo mkdir -p /home/deck/homebrew/plugins
-sudo rm -rf "$PLUGIN_DEST"
-sudo mkdir -p "$PLUGIN_DEST"
-sudo cp -a "${EXTRACTED_ROOT}/." "$PLUGIN_DEST/"
+run_root mkdir -p /home/deck/homebrew/plugins
+run_root rm -rf "$PLUGIN_DEST"
+run_root mkdir -p "$PLUGIN_DEST"
+run_root cp -a "${EXTRACTED_ROOT}/." "$PLUGIN_DEST/"
 
 echo "Ensuring settings directory exists at ${SETTINGS_DIR}"
 mkdir -p "$SETTINGS_DIR"
 
+if [[ -f "${PLUGIN_DEST}/config/transcription_profiles.json" && ! -f "${SETTINGS_DIR}/transcription_profiles.json" ]]; then
+  echo "Copying default transcription profile template to settings directory"
+  cp -a "${PLUGIN_DEST}/config/transcription_profiles.json" "${SETTINGS_DIR}/transcription_profiles.json"
+fi
+
 echo "Restarting Decky Loader"
-sudo systemctl restart plugin_loader.service
+run_root systemctl restart plugin_loader.service
 
 echo "Done. Plugin installed from ${REPO_OWNER}/${REPO_NAME}@${REPO_REF}."
