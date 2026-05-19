@@ -11,7 +11,7 @@ It is designed for push-to-talk use in Gaming Mode, with per-game profiles for b
 - Per-game profiles, with global defaults.
 - Configurable transcription profiles from JSON.
 - OpenAI-compatible transcription endpoint support.
-- Built-in examples for Groq and OpenAI Whisper endpoints.
+- Built-in examples for Groq, OpenAI, and OpenRouter endpoints.
 - Optional `language` per transcription profile, with `auto` as the default.
 - Unicode-friendly text insertion through clipboard-based paste paths.
 - Bundled command-line tools under `bin/` to reduce external dependencies.
@@ -31,6 +31,12 @@ It is designed for push-to-talk use in Gaming Mode, with per-game profiles for b
 
 5) Open the Decky Loader sidebar and verify that **AI Speech-to-Text** appears.
 
+6) Configure transcription profiles (API keys, provider/model) in:
+
+```text
+/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json
+```
+
 ### Alternative: Manual install by copying the extracted plugin folder 🛠️
 
 ```bash
@@ -38,25 +44,11 @@ cp -r /path/to/extracted/ai-speech-to-text /home/deck/homebrew/plugins/ai-speech
 sudo systemctl restart plugin_loader.service
 ```
 
-## First Setup 🚀
+Then configure transcription profiles in:
 
-1. Open the installed plugin folder:
-
-```bash
-cd /home/deck/homebrew/plugins/ai-speech-to-text
+```text
+/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json
 ```
-
-2. Edit the transcription profile file:
-
-```bash
-nano config/transcription_profiles.json
-```
-
-3. Add your API key to the profile you want to use.
-
-4. Restart Decky Loader or reload the plugin.
-
-5. Open the plugin from Decky and enable it.
 
 ## Transcription Profiles 🧠
 
@@ -122,6 +114,21 @@ The backend is dynamic: it does not hard-code provider routing. It sends the req
 
 Most providers use OpenAI-compatible multipart uploads. OpenRouter is handled automatically with JSON + base64 `input_audio`.
 
+### Recommended Provider for Free Usage
+
+For free-tier usage, the recommended provider is **Groq** (`whisper-large-v3` or `whisper-large-v3-turbo`) because it offers generous STT limits on free accounts and is typically faster in real-time plugin workflows compared with other providers.
+
+Current Groq free-tier STT limits for these models:
+
+- `20 RPM` (requests per minute)
+- `2,000 RPD` (requests per day)
+- `7,200 ASH` (audio seconds per hour, equal to 2 hours/hour)
+- `28,800 ASD` (audio seconds per day, equal to 8 hours/day)
+
+Official reference:
+
+- https://console.groq.com/docs/rate-limits
+
 ## Using The Plugin 🎮
 
 Open **AI Speech-to-Text** from Decky.
@@ -153,7 +160,7 @@ L1, R1, L2, R2, L3, R3, A, B, X, Y, DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT
 
 ### Provider / Model 🤖
 
-The **Provider / model** dropdown lists the profiles from `config/transcription_profiles.json`.
+The **Provider / model** dropdown lists the profiles from `/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json`.
 
 Selecting a profile changes the transcription endpoint/model used by the current global or per-game profile.
 
@@ -242,6 +249,8 @@ The log includes:
 - insertion backend
 - HTTP/transcription errors
 
+Some low-level backend details are only shown when debug logging is enabled.
+
 ## Troubleshooting 🧪
 
 ### Restart services 🔄
@@ -255,7 +264,7 @@ sudo systemctl restart plugin_loader.service
 Restart Steam client if needed:
 
 ```bash
-sudo systemctl restart steam
+systemctl --user restart app-steam@autostart.service
 ```
 
 ### Basic checks 🔍
