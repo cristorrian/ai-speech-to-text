@@ -15,7 +15,7 @@ import uuid
 import ssl
 from pathlib import Path
 
-import decky_plugin
+import decky_plugin  # type: ignore[import-not-found]
 
 def _decky_settings_dir() -> Path:
     p = os.environ.get("DECKY_PLUGIN_SETTINGS_DIR", "").strip()
