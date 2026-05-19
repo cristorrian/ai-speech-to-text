@@ -1,0 +1,10 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Uninstall AI Speech-to-Text
+Comment=Uninstall AI Speech-to-Text Decky plugin
+Exec=sh -c 'rm -f /tmp/uninstall-ai-speech-to-text.sh; if curl -S -s -L -o /tmp/uninstall-ai-speech-to-text.sh --connect-timeout 60 https://raw.githubusercontent.com/cristorrian/ai-speech-to-text/main/uninstall.sh; then chmod +x /tmp/uninstall-ai-speech-to-text.sh; bash /tmp/uninstall-ai-speech-to-text.sh; else echo "Download failed. Please try again."; read; fi'
+Icon=edit-delete
+Terminal=true
+Categories=Utility;
