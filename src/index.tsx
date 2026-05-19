@@ -34,12 +34,44 @@ const normalizeButtons = (next: string[]) => {
   return [first, second];
 };
 
-const getActiveGame = () => {
+const getActiveGame = async () => {
   try {
     const router: any = Router as any;
-    const app = router?.MainRunningApp || (Array.isArray(router?.RunningApps) ? router.RunningApps[0] : undefined);
-    const appId = app?.appid ? String(app.appid) : "";
-    const appName = app?.display_name ? String(app.display_name) : "";
+    const running = Array.isArray(router?.RunningApps) ? router.RunningApps : [];
+    const app =
+      router?.MainRunningApp ||
+      running[0] ||
+      router?.AppStore?.m_selectedApp ||
+      router?.AppStore?.m_currentApp;
+
+    let appId = app?.appid ? String(app.appid) : "";
+    let appName = app?.display_name ? String(app.display_name) : "";
+
+    // Fallback to SteamClient APIs when Router fields are unavailable.
+    if (!appId) {
+      const apps: any = (window as any)?.SteamClient?.Apps;
+      try {
+        const current = await apps?.GetCurrentGame?.();
+        if (current?.appid) appId = String(current.appid);
+        if (current?.display_name) appName = String(current.display_name);
+      } catch {
+        // no-op
+      }
+      try {
+        const focus = await apps?.GetGamepadFocusedApp?.();
+        if (!appId && focus?.appid) appId = String(focus.appid);
+        if (!appName && focus?.display_name) appName = String(focus.display_name);
+      } catch {
+        // no-op
+      }
+    }
+
+    // Final fallback: parse app id from URL path/hash.
+    if (!appId) {
+      const raw = `${window.location?.pathname || ""} ${window.location?.hash || ""} ${window.location?.href || ""}`;
+      const m = raw.match(/(?:app|game)\/(\d{2,})/i);
+      if (m?.[1]) appId = m[1];
+    }
     return { appId, appName };
   } catch {
     return { appId: "", appName: "" };
@@ -62,7 +94,7 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
   const lastKnownAppRef = useRef("");
 
   const syncActiveGame = async () => {
-    const { appId, appName } = getActiveGame();
+    const { appId, appName } = await getActiveGame();
     const signature = `${appId}:${appName}`;
     if (signature === lastKnownAppRef.current) return;
     lastKnownAppRef.current = signature;
@@ -133,7 +165,7 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
   }, []);
 
   const enableGameProfile = async (enabled: boolean) => {
-    const { appId, appName } = getActiveGame();
+    const { appId, appName } = await getActiveGame();
     if (!appId) {
       await flog("warn", "game profile toggle ignored: no active game");
       await refresh();
@@ -267,7 +299,7 @@ export default definePlugin((serverAPI: ServerAPI) => {
   let lastKnownApp = "";
   const syncActiveGame = async () => {
     try {
-      const { appId, appName } = getActiveGame();
+      const { appId, appName } = await getActiveGame();
       const signature = `${appId}:${appName}`;
       if (signature === lastKnownApp) return;
       lastKnownApp = signature;

@@ -15,7 +15,8 @@ RUNTIME_DIR = "/tmp/ai-speech-to-text"
 os.makedirs(RUNTIME_DIR, exist_ok=True)
 STATE_FILE = os.path.join(RUNTIME_DIR, "ai_speech_to_text_state")
 PID_FILE = os.path.join(RUNTIME_DIR, "ai_speech_to_text_listener.pid")
-CONFIG_FILE = os.path.join(PLUGIN_DIR, "config", "decky_button_config.json")
+SETTINGS_DIR = os.environ.get("DECKY_PLUGIN_SETTINGS_DIR", "").strip() or os.path.expanduser("~/homebrew/settings/ai-speech-to-text")
+CONFIG_FILE = os.path.join(SETTINGS_DIR, "decky_button_config.json")
 
 BUTTON_CODES = {
     "L1": [310],

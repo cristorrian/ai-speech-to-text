@@ -63,7 +63,7 @@ nano config/transcription_profiles.json
 Provider and model definitions live in:
 
 ```text
-/home/deck/homebrew/plugins/ai-speech-to-text/config/transcription_profiles.json
+/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json
 ```
 
 The repository includes the same file as a template at:
@@ -130,6 +130,11 @@ Open **AI Speech-to-Text** from Decky.
 
 Enable or disable the plugin with **Enabled**.
 
+`Enabled` follows the active scope:
+
+- Global when no per-game profile is active.
+- Per-game when a game profile is active.
+
 When enabled, the controller listener starts and watches for the selected push-to-talk combo.
 
 ### Push-To-Talk 🎤
@@ -168,6 +173,7 @@ The plugin automatically detects the active Steam app when possible.
 
 Use **Profile for this game** to create a profile for the current game. Once enabled, these settings are saved separately for that game:
 
+- Enabled
 - Button 1
 - Button 2
 - Provider / model
@@ -178,7 +184,7 @@ When no per-game profile is active, the plugin edits the global settings.
 Button/profile settings are stored in:
 
 ```text
-/home/deck/homebrew/plugins/ai-speech-to-text/config/decky_button_config.json
+/home/deck/homebrew/settings/ai-speech-to-text/decky_button_config.json
 ```
 
 ## Text Insertion 📝
@@ -216,13 +222,13 @@ The controller listener uses vendored Python `evdev` from `py_modules/`.
 The main plugin log writes to:
 
 ```text
-/home/deck/homebrew/plugins/ai-speech-to-text/logs/ai-speech-to-text.log
+/home/deck/homebrew/logs/ai-speech-to-text/ai-speech-to-text.log
 ```
 
 Useful commands:
 
 ```bash
-tail -f /home/deck/homebrew/plugins/ai-speech-to-text/logs/ai-speech-to-text.log
+tail -f /home/deck/homebrew/logs/ai-speech-to-text/ai-speech-to-text.log
 journalctl -u plugin_loader.service -n 200 --no-pager
 ```
 
@@ -263,8 +269,8 @@ Check that the plugin path exists:
 Check that button config and transcription profiles exist:
 
 ```text
-/home/deck/homebrew/plugins/ai-speech-to-text/config/decky_button_config.json
-/home/deck/homebrew/plugins/ai-speech-to-text/config/transcription_profiles.json
+/home/deck/homebrew/settings/ai-speech-to-text/decky_button_config.json
+/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json
 ```
 
 ### Logs 📋
@@ -272,7 +278,7 @@ Check that button config and transcription profiles exist:
 Follow plugin logs:
 
 ```bash
-tail -f /home/deck/homebrew/plugins/ai-speech-to-text/logs/ai-speech-to-text.log
+tail -f /home/deck/homebrew/logs/ai-speech-to-text/ai-speech-to-text.log
 ```
 
 Follow plugin loader logs:

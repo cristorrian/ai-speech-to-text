@@ -17,13 +17,25 @@ from pathlib import Path
 
 import decky_plugin
 
-PLUGIN_DIR = Path(os.environ.get("DECKY_PLUGIN_DIR") or Path(__file__).resolve().parent)
-LOG_DIR = PLUGIN_DIR / "logs"
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-LOG_FILE = LOG_DIR / "ai-speech-to-text.log"
+def _decky_settings_dir() -> Path:
+    p = os.environ.get("DECKY_PLUGIN_SETTINGS_DIR", "").strip()
+    if p:
+        return Path(p)
+    return Path(os.path.expanduser("~/homebrew/settings/ai-speech-to-text"))
+
+
+def _decky_log_file() -> str:
+    log_dir = os.environ.get("DECKY_PLUGIN_LOG_DIR", "").strip()
+    if log_dir:
+        d = Path(log_dir)
+    else:
+        d = Path(os.path.expanduser("~/homebrew/logs/ai-speech-to-text"))
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d / "ai-speech-to-text.log")
+
 
 logging.basicConfig(
-    filename=str(LOG_FILE),
+    filename=_decky_log_file(),
     format="AISpeechToText: %(asctime)s %(levelname)s %(message)s",
     filemode="a",
     force=True,
@@ -56,18 +68,15 @@ _install_runtime_exception_hooks()
 
 class VoiceInputService:
     def __init__(self):
-        # Keep this legacy config directory for compatibility with earlier builds.
-        self.config_dir = Path(os.path.expanduser("~/.config/voice-input"))
+        self.config_dir = _decky_settings_dir()
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.config_file = self.config_dir / "config"
-        self.legacy_json_config_file = self.config_dir / "config.json"
         self.plugin_config_dir = self._plugin_dir() / "config"
         self.plugin_config_dir.mkdir(parents=True, exist_ok=True)
-        self.transcription_profiles_file = self.plugin_config_dir / "transcription_profiles.json"
-        self.legacy_transcription_profiles_file = self.config_dir / "transcription_profiles.json"
-        self.openai_key_file = self.config_dir / "openai_api_key"
-        self.groq_key_file = self.config_dir / "groq_api_key"
-        self.api_key_file = self.config_dir / "api_key"
+        self.transcription_profiles_file = self.config_dir / "transcription_profiles.json"
+        self.openai_key_file = Path(os.path.expanduser("~/.config/voice-input/openai_api_key"))
+        self.groq_key_file = Path(os.path.expanduser("~/.config/voice-input/groq_api_key"))
+        self.api_key_file = Path(os.path.expanduser("~/.config/voice-input/api_key"))
         self.runtime_dir = Path("/tmp/ai-speech-to-text")
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
         self.audio_file = self.runtime_dir / "recording.wav"
@@ -206,84 +215,13 @@ class VoiceInputService:
 
     def _load_transcription_profiles_config(self):
         cfg = self._default_transcription_profiles()
-        if (not self.transcription_profiles_file.exists()) and self.legacy_transcription_profiles_file.exists():
-            try:
-                self.transcription_profiles_file.write_text(self.legacy_transcription_profiles_file.read_text())
-                logger.info("migrated transcription_profiles.json from legacy config dir")
-            except Exception:
-                logger.exception("failed to migrate legacy transcription_profiles.json")
         should_write_default = not self.transcription_profiles_file.exists()
         try:
             if self.transcription_profiles_file.exists():
                 loaded = json.loads(self.transcription_profiles_file.read_text())
                 if isinstance(loaded, dict):
-                    # Formato nuevo preferido
                     if "profiles" in loaded:
                         cfg.update({k: v for k, v in loaded.items() if k in ("profiles",)})
-                    # Compatibilidad: formato antiguo por perfiles
-                    elif "providers" in loaded:
-                        providers = loaded.get("providers", {})
-                        migrated = self._default_transcription_profiles()
-                        if isinstance(providers, dict):
-                            migrated_profiles = []
-                            for provider_name, provider_cfg in providers.items():
-                                if not isinstance(provider_cfg, dict):
-                                    continue
-                                provider = str(provider_name or "").strip().lower()
-                                if provider == "groq":
-                                    provider = "grok"
-                                entry = {
-                                    "name": str(provider_cfg.get("name", "") or provider or "Custom").strip(),
-                                    "provider": provider,
-                                    "model": "",
-                                    "language": "auto",
-                                    "api_key": "",
-                                    "api_url": "",
-                                }
-                                if provider_cfg.get("model"):
-                                    entry["model"] = str(provider_cfg.get("model", "")).strip()
-                                if provider_cfg.get("api_url"):
-                                    entry["api_url"] = str(provider_cfg.get("api_url", "")).strip()
-                                if provider_cfg.get("api_key"):
-                                    entry["api_key"] = str(provider_cfg.get("api_key", "")).strip()
-                                if provider_cfg.get("language"):
-                                    entry["language"] = str(provider_cfg.get("language", "")).strip().lower()
-                                migrated_profiles.append(entry)
-                            if migrated_profiles:
-                                migrated["profiles"] = migrated_profiles
-                        cfg = migrated
-                        should_write_default = True
-                    elif "active_profile" in loaded:
-                        profiles = loaded.get("profiles", {})
-                        migrated = self._default_transcription_profiles()
-                        if isinstance(profiles, dict):
-                            migrated_profiles = []
-                            for profile_name, profile in profiles.items():
-                                if not isinstance(profile, dict):
-                                    continue
-                                raw_provider = str(profile.get("provider", "")).strip().lower()
-                                provider = "grok" if raw_provider == "groq" else raw_provider
-                                entry = {
-                                    "name": str(profile.get("name", "") or profile_name or "Custom").strip(),
-                                    "provider": provider,
-                                    "model": "",
-                                    "language": "auto",
-                                    "api_key": "",
-                                    "api_url": "",
-                                }
-                                if profile.get("model"):
-                                    entry["model"] = str(profile.get("model", "")).strip()
-                                if profile.get("api_url"):
-                                    entry["api_url"] = str(profile.get("api_url", "")).strip()
-                                if profile.get("api_key"):
-                                    entry["api_key"] = str(profile.get("api_key", "")).strip()
-                                if profile.get("language"):
-                                    entry["language"] = str(profile.get("language", "")).strip().lower()
-                                migrated_profiles.append(entry)
-                            if migrated_profiles:
-                                migrated["profiles"] = migrated_profiles
-                        cfg = migrated
-                        should_write_default = True
         except Exception:
             logger.exception("transcription profiles load failed")
             should_write_default = True
@@ -362,11 +300,6 @@ class VoiceInputService:
             try:
                 parsed = self._parse_shell_config(self.config_file.read_text())
                 cfg.update(parsed)
-            except Exception:
-                pass
-        elif self.legacy_json_config_file.exists():
-            try:
-                cfg.update(json.loads(self.legacy_json_config_file.read_text()))
             except Exception:
                 pass
 
@@ -1023,7 +956,7 @@ class Plugin:
 
     @staticmethod
     def _button_cfg_file():
-        return Plugin.service.plugin_config_dir / "decky_button_config.json"
+        return _decky_settings_dir() / "decky_button_config.json"
 
     @staticmethod
     def _load_button_cfg():
@@ -1040,7 +973,7 @@ class Plugin:
             if f.exists():
                 loaded = json.loads(f.read_text())
                 if isinstance(loaded, dict):
-                    cfg = Plugin._migrate_button_cfg(loaded)
+                    cfg = loaded
         except Exception:
             logger.exception("button config load failed")
         return Plugin._normalize_button_cfg(cfg)
@@ -1068,25 +1001,11 @@ class Plugin:
             "enter_mode": mode,
             "transcription_profile": str(profile.get("transcription_profile", "Grok Whisper Large v3") or "Grok Whisper Large v3"),
         }
+        if "enabled" in profile:
+            normalized["enabled"] = bool(profile.get("enabled", False))
         if profile.get("app_name"):
             normalized["app_name"] = str(profile.get("app_name", ""))[:160]
         return normalized
-
-    @staticmethod
-    def _migrate_button_cfg(loaded):
-        if isinstance(loaded.get("global"), dict):
-            return loaded
-        return {
-            "version": 2,
-            "enabled": bool(loaded.get("enabled", False)),
-            "active_app_id": str(loaded.get("active_app_id", "") or ""),
-            "active_app_name": str(loaded.get("active_app_name", "") or ""),
-            "global": {
-                "buttons": loaded.get("buttons", ["L1", "R1"]),
-                "enter_mode": loaded.get("enter_mode", "pre_post"),
-            },
-            "profiles": loaded.get("profiles", {}) if isinstance(loaded.get("profiles"), dict) else {},
-        }
 
     @staticmethod
     def _normalize_button_cfg(cfg):
@@ -1118,6 +1037,13 @@ class Plugin:
             profile = cfg["profiles"][app_key]
             return Plugin._normalize_profile(profile), True, app_key
         return Plugin._normalize_profile(cfg.get("global")), False, app_key
+
+    @staticmethod
+    def _effective_enabled(cfg, app_id=None):
+        profile, has_profile, _app_key = Plugin._effective_profile(cfg, app_id)
+        if has_profile and "enabled" in profile:
+            return bool(profile.get("enabled", False))
+        return bool(cfg.get("enabled", False))
 
     @staticmethod
     def _normalize_buttons(buttons):
@@ -1204,8 +1130,8 @@ class Plugin:
             print(f"AISpeechToText: ensure_ydotoold={ok}", flush=True)
             cfg = Plugin._load_button_cfg()
             Plugin._save_button_cfg(cfg)
-            Plugin.service.enabled = bool(cfg.get("enabled", False))
             profile, _has_profile, _app_key = Plugin._effective_profile(cfg)
+            Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
             Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
             Plugin.service.active_app_id = cfg.get("active_app_id", "")
@@ -1233,10 +1159,14 @@ class Plugin:
         Plugin.stop_controller_listener()
 
     async def set_enabled(self, enabled: bool):
-        Plugin.service.enabled = bool(enabled)
         cfg = Plugin._load_button_cfg()
-        cfg["enabled"] = Plugin.service.enabled
+        _profile, has_profile, app_key = Plugin._effective_profile(cfg)
+        if has_profile and app_key:
+            cfg["profiles"][app_key]["enabled"] = bool(enabled)
+        else:
+            cfg["enabled"] = bool(enabled)
         Plugin._save_button_cfg(cfg)
+        Plugin.service.enabled = Plugin._effective_enabled(cfg)
         if Plugin.service.enabled and (Plugin.listener_process is None or Plugin.listener_process.poll() is not None):
             Plugin.start_controller_listener()
         elif not Plugin.service.enabled:
@@ -1248,10 +1178,15 @@ class Plugin:
         profile, has_profile, app_key = Plugin._effective_profile(cfg)
         tx_cfg = Plugin.service._load_transcription_profiles_config()
         tx_active = Plugin.service._load_transcription_provider(profile.get("transcription_profile", "Grok Whisper Large v3"))
+        tx_profiles = tx_cfg.get("profiles", [])
+        if isinstance(tx_profiles, dict):
+            tx_profiles = list(tx_profiles.values())
+        if not isinstance(tx_profiles, list):
+            tx_profiles = []
         return {
             "success": True,
             "recording": Plugin.service.is_recording,
-            "enabled": Plugin.service.enabled,
+            "enabled": Plugin._effective_enabled(cfg),
             "last_text": Plugin.service.last_text,
             "last_error": Plugin.service.last_error,
             "buttons": profile["buttons"],
@@ -1264,7 +1199,7 @@ class Plugin:
             "active_app_name": cfg.get("active_app_name", ""),
             "transcription": {
                 "active_profile": tx_active.get("active_profile", "Grok Whisper Large v3"),
-                "profiles": tx_cfg.get("profiles", {}),
+                "profiles": tx_profiles,
             },
         }
 
@@ -1285,9 +1220,13 @@ class Plugin:
                 cfg["global"]["buttons"] = unique
             Plugin._save_button_cfg(cfg)
             active_profile, _has_profile, _app_key = Plugin._effective_profile(cfg)
+            Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.enter_mode = active_profile.get("enter_mode", "pre_post")
             Plugin.service.transcription_provider = active_profile.get("transcription_profile", "Grok Whisper Large v3")
-            Plugin.start_controller_listener()
+            if Plugin.service.enabled:
+                Plugin.start_controller_listener()
+            else:
+                Plugin.stop_controller_listener()
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -1304,6 +1243,7 @@ class Plugin:
             else:
                 cfg["global"]["enter_mode"] = mode
             Plugin._save_button_cfg(cfg)
+            Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.enter_mode = mode
             active_profile, _has_profile, _app_key = Plugin._effective_profile(cfg)
             Plugin.service.transcription_provider = active_profile.get("transcription_profile", "Grok Whisper Large v3")
@@ -1316,17 +1256,30 @@ class Plugin:
             cfg = Plugin._load_button_cfg()
             app_key = str(app_id or "").strip()
             app_title = str(app_name or "").strip()[:160]
+            if not app_key:
+                # Ignore empty updates from frontend detection glitches.
+                profile, has_profile, existing_key = Plugin._effective_profile(cfg)
+                Plugin.service.enabled = Plugin._effective_enabled(cfg)
+                Plugin.service.active_app_id = str(cfg.get("active_app_id", "") or "")
+                Plugin.service.active_app_name = str(cfg.get("active_app_name", "") or "")
+                Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
+                Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
+                return {"success": True, "has_game_profile": has_profile, "profile": profile, "active_app_id": existing_key}
             previous_profile, _previous_has_profile, _previous_key = Plugin._effective_profile(cfg)
             cfg["active_app_id"] = app_key
             cfg["active_app_name"] = app_title
             Plugin._save_button_cfg(cfg)
             profile, has_profile, _app_key = Plugin._effective_profile(cfg)
+            Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.active_app_id = app_key
             Plugin.service.active_app_name = app_title
             Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
             Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
-            if profile.get("buttons") != previous_profile.get("buttons") and Plugin.service.enabled:
-                Plugin.start_controller_listener()
+            if Plugin.service.enabled:
+                if profile.get("buttons") != previous_profile.get("buttons"):
+                    Plugin.start_controller_listener()
+            else:
+                Plugin.stop_controller_listener()
             return {"success": True, "has_game_profile": has_profile, "profile": profile}
         except Exception as e:
             logger.exception("set_active_game failed")
@@ -1350,12 +1303,15 @@ class Plugin:
             cfg["active_app_name"] = str(app_name or "").strip()[:160]
             Plugin._save_button_cfg(cfg)
             profile, has_profile, _profile_key = Plugin._effective_profile(cfg)
+            Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.active_app_id = app_key
             Plugin.service.active_app_name = cfg["active_app_name"]
             Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
             Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
             if Plugin.service.enabled:
                 Plugin.start_controller_listener()
+            else:
+                Plugin.stop_controller_listener()
             return {"success": True, "has_game_profile": has_profile, "profile": profile}
         except Exception as e:
             logger.exception("set_game_profile_enabled failed")
@@ -1377,6 +1333,7 @@ class Plugin:
                 btn_cfg["global"]["transcription_profile"] = next_profile
             Plugin._save_button_cfg(btn_cfg)
             effective, _has_profile, _app_key = Plugin._effective_profile(btn_cfg)
+            Plugin.service.enabled = Plugin._effective_enabled(btn_cfg)
             Plugin.service.transcription_provider = effective.get("transcription_profile", "Grok Whisper Large v3")
             return {"success": True, "transcription_profile": Plugin.service.transcription_provider}
         except Exception as e:
