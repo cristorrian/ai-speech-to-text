@@ -19,6 +19,12 @@ It is designed for push-to-talk use in Gaming Mode, with per-game profiles for b
 
 ## Installation 📦
 
+This project supports three install paths. They all install the same plugin:
+
+- Decky ZIP install in Gaming Mode (recommended for normal users)
+- One-click desktop launcher (`Install AI Speech-to-Text.desktop`)
+- Manual copy (advanced/manual testing)
+
 ### Recommended: Install from ZIP in Decky Loader ✅
 
 1) Download the plugin ZIP from GitHub Releases to your Steam Deck (for example into `~/Downloads`).
@@ -40,6 +46,8 @@ It is designed for push-to-talk use in Gaming Mode, with per-game profiles for b
 Important:
 - Use the release asset ZIP (packaged plugin), not GitHub's automatic "Source code (zip)".
 - The release ZIP already includes the exact Decky runtime layout.
+- After install, configure your API keys in:
+  `/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json`
 
 ### Alternative: One-click installer in Desktop Mode 🖱️
 
@@ -49,6 +57,7 @@ Use `Install AI Speech-to-Text.desktop` from this repository.
 - It downloads `install-from-github.sh` from this repo and runs it in a terminal.
 - The script installs the plugin to `/home/deck/homebrew/plugins/ai-speech-to-text`, seeds default settings if missing, restarts Decky, and restarts Steam.
 - It asks for sudo password when required.
+- It does not overwrite an existing settings file if one is already present.
 
 ### Alternative: Manual install by copying the extracted plugin folder 🛠️
 
@@ -62,6 +71,12 @@ Then configure transcription profiles in:
 
 ```text
 /home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json
+```
+
+Template source used by the installer:
+
+```text
+/home/deck/homebrew/plugins/ai-speech-to-text/config/transcription_profiles.json
 ```
 
 ## Transcription Profiles 🧠
@@ -328,6 +343,14 @@ Terminal uninstall with full data purge:
 
 ```bash
 ./uninstall.sh --purge-data
+```
+
+Paths removed by `--purge-data`:
+
+```text
+/home/deck/homebrew/plugins/ai-speech-to-text
+/home/deck/homebrew/settings/ai-speech-to-text
+/home/deck/homebrew/logs/ai-speech-to-text
 ```
 
 ## Development 👨‍💻
