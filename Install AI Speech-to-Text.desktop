@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Install AI Speech-to-Text
+Comment=Download and install AI Speech-to-Text Decky plugin from GitHub
+Exec=bash -lc "cd \"$HOME\" && curl -fsSL https://raw.githubusercontent.com/cristorrian/ai-speech-to-text/main/install-from-github.sh -o /tmp/install-ai-speech-to-text.sh && chmod +x /tmp/install-ai-speech-to-text.sh && /tmp/install-ai-speech-to-text.sh"
+Icon=system-software-install
+Terminal=true
+Categories=Utility;
