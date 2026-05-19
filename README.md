@@ -41,11 +41,21 @@ Important:
 - Use the release asset ZIP (packaged plugin), not GitHub's automatic "Source code (zip)".
 - The release ZIP already includes the exact Decky runtime layout.
 
+### Alternative: One-click installer in Desktop Mode 🖱️
+
+Use `Install AI Speech-to-Text.desktop` from this repository.
+
+- Double-click the file in Desktop Mode.
+- It downloads `install-from-github.sh` from this repo and runs it in a terminal.
+- The script installs the plugin to `/home/deck/homebrew/plugins/ai-speech-to-text`, seeds default settings if missing, restarts Decky, and restarts Steam.
+- It asks for sudo password when required.
+
 ### Alternative: Manual install by copying the extracted plugin folder 🛠️
 
 ```bash
-cp -r /path/to/extracted/ai-speech-to-text /home/deck/homebrew/plugins/ai-speech-to-text
+sudo cp -r /path/to/extracted/ai-speech-to-text /home/deck/homebrew/plugins/ai-speech-to-text
 sudo systemctl restart plugin_loader.service
+systemctl --user restart app-steam@autostart.service
 ```
 
 Then configure transcription profiles in:
@@ -300,6 +310,26 @@ Follow plugin loader logs:
 journalctl -u plugin_loader.service -n 200 --no-pager
 ```
 
+## Uninstall 🗑️
+
+Desktop one-click uninstall:
+
+- Double-click `Uninstall AI Speech-to-Text.desktop`.
+- It downloads and runs `uninstall.sh --purge-data`.
+- This removes plugin files, settings, and logs, then restarts Decky and Steam.
+
+Terminal uninstall:
+
+```bash
+./uninstall.sh
+```
+
+Terminal uninstall with full data purge:
+
+```bash
+./uninstall.sh --purge-data
+```
+
 ## Development 👨‍💻
 
 Install frontend dependencies:
@@ -317,8 +347,9 @@ npm run build
 Install or refresh the local Decky plugin copy:
 
 ```bash
-cp -r /path/to/ai-speech-to-text /home/deck/homebrew/plugins/ai-speech-to-text
+sudo cp -r /path/to/ai-speech-to-text /home/deck/homebrew/plugins/ai-speech-to-text
 sudo systemctl restart plugin_loader.service
+systemctl --user restart app-steam@autostart.service
 ```
 
 Project layout:
@@ -341,33 +372,6 @@ plugin.json                     Decky metadata
 - `dist/index.js` should be committed so users do not need Node.js to install the plugin.
 - `node_modules/` should not be committed; `package.json` and `package-lock.json` are enough for development.
 - The `bin/` and `py_modules/` folders are intentionally included because the plugin is designed to be self-contained.
-
-### Build a Release ZIP
-
-Create a distribution ZIP with Decky-compatible structure:
-
-```bash
-./scripts/package-release.sh
-```
-
-Output:
-
-```text
-release/ai-speech-to-text-v<version>.zip
-```
-
-ZIP layout:
-
-```text
-ai-speech-to-text/
-├── plugin.json
-├── package.json
-├── main.py
-├── dist/index.js
-├── bin/
-├── py_modules/
-└── config/
-```
 
 ## Author 👤
 

@@ -5,7 +5,7 @@
       "provider": "grok",
       "model": "whisper-large-v3",
       "language": "auto",
-      "api_key": "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",
+      "api_key": "",
       "api_url": "https://api.groq.com/openai/v1/audio/transcriptions"
     },
     {
