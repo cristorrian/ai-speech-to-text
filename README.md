@@ -19,34 +19,9 @@ It is designed for push-to-talk use in Gaming Mode, with per-game profiles for b
 
 ## Installation 📦
 
-This project supports three install paths. They all install the same plugin:
+Official install method: one-click desktop launcher.
 
-- Decky ZIP install in Gaming Mode (recommended for normal users)
-- One-click desktop launcher (`Install AI Speech-to-Text.desktop`)
-- Manual copy (advanced/manual testing)
-
-### Recommended: Install from ZIP in Decky Loader ✅
-
-1) Download the plugin ZIP from GitHub Releases to your Steam Deck (for example into `~/Downloads`).
-
-2) In Gaming Mode, open Decky Loader settings and enable Developer mode.
-
-3) Open the Developer section and choose **Install Plugin from ZIP**.
-
-4) Select the ZIP file you downloaded and confirm installation.
-
-5) Open the Decky Loader sidebar and verify that **AI Speech-to-Text** appears.
-
-6) Configure transcription profiles (API keys, provider/model) in:
-
-```text
-/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json
-```
-
-After install, configure your API keys in:
-`/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json`
-
-### Alternative: One-click installer in Desktop Mode 🖱️
+### Install in Desktop Mode 🖱️
 
 Use `Install AI Speech-to-Text.desktop` from this repository.
 
@@ -56,25 +31,14 @@ Use `Install AI Speech-to-Text.desktop` from this repository.
 - It asks for sudo password when required.
 - It does not overwrite an existing settings file if one is already present.
 
-### Alternative: Manual install by copying the extracted plugin folder 🛠️
-
-```bash
-sudo cp -r /path/to/extracted/ai-speech-to-text /home/deck/homebrew/plugins/ai-speech-to-text
-sudo systemctl restart plugin_loader.service
-systemctl --user restart app-steam@autostart.service
-```
-
-Then configure transcription profiles in:
-
-```text
-/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json
-```
-
 Template source used by the installer:
 
 ```text
 /home/deck/homebrew/plugins/ai-speech-to-text/config/transcription_profiles.json
 ```
+
+After install, configure your API keys in:
+`/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json`
 
 ## Transcription Profiles 🧠
 
