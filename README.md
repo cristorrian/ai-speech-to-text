@@ -21,7 +21,7 @@ It is designed for push-to-talk use in Gaming Mode, with per-game profiles for b
 
 ### Recommended: Install from ZIP in Decky Loader ✅
 
-1) Download the plugin ZIP from GitHub to your Steam Deck (for example into `~/Downloads`).
+1) Download the plugin ZIP from GitHub Releases to your Steam Deck (for example into `~/Downloads`).
 
 2) In Gaming Mode, open Decky Loader settings and enable Developer mode.
 
@@ -36,6 +36,10 @@ It is designed for push-to-talk use in Gaming Mode, with per-game profiles for b
 ```text
 /home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json
 ```
+
+Important:
+- Use the release asset ZIP (packaged plugin), not GitHub's automatic "Source code (zip)".
+- The release ZIP already includes the exact Decky runtime layout.
 
 ### Alternative: Manual install by copying the extracted plugin folder 🛠️
 
@@ -337,6 +341,33 @@ plugin.json                     Decky metadata
 - `dist/index.js` should be committed so users do not need Node.js to install the plugin.
 - `node_modules/` should not be committed; `package.json` and `package-lock.json` are enough for development.
 - The `bin/` and `py_modules/` folders are intentionally included because the plugin is designed to be self-contained.
+
+### Build a Release ZIP
+
+Create a distribution ZIP with Decky-compatible structure:
+
+```bash
+./scripts/package-release.sh
+```
+
+Output:
+
+```text
+release/ai-speech-to-text-v<version>.zip
+```
+
+ZIP layout:
+
+```text
+ai-speech-to-text/
+├── plugin.json
+├── package.json
+├── main.py
+├── dist/index.js
+├── bin/
+├── py_modules/
+└── config/
+```
 
 ## Author 👤
 
