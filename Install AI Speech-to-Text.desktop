@@ -1,9 +1,10 @@
+#!/usr/bin/env xdg-open
 [Desktop Entry]
 Type=Application
 Version=1.0
 Name=Install AI Speech-to-Text
 Comment=Download and install AI Speech-to-Text Decky plugin from GitHub
-Exec=bash -lc "cd \"$HOME\" && curl -fsSL https://raw.githubusercontent.com/cristorrian/ai-speech-to-text/main/install-from-github.sh -o /tmp/install-ai-speech-to-text.sh && chmod +x /tmp/install-ai-speech-to-text.sh && /tmp/install-ai-speech-to-text.sh"
+Exec=sh -c 'rm -f /tmp/install-ai-speech-to-text.sh; if curl -S -s -L -o /tmp/install-ai-speech-to-text.sh --connect-timeout 60 https://raw.githubusercontent.com/cristorrian/ai-speech-to-text/main/install-from-github.sh; then chmod +x /tmp/install-ai-speech-to-text.sh; bash /tmp/install-ai-speech-to-text.sh; else echo "Download failed. Please try again."; read; fi'
 Icon=system-software-install
 Terminal=true
 Categories=Utility;
