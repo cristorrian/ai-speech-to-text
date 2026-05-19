@@ -95,4 +95,7 @@ fi
 echo "Restarting Decky Loader"
 run_root systemctl restart plugin_loader.service
 
+echo "Restarting Steam client"
+systemctl --user restart app-steam@autostart.service
+
 echo "Done. Plugin installed from ${REPO_OWNER}/${REPO_NAME}@${REPO_REF}."
