@@ -90,6 +90,7 @@ class VoiceInputService:
         self.last_method = ""
         self.enter_mode = "pre_post"
         self.transcription_provider = "grok"
+        self.debug_logging = False
         self.active_app_id = ""
         self.active_app_name = ""
         self.clipboard_owner_proc = None
@@ -135,6 +136,12 @@ class VoiceInputService:
         env.pop("PYTHONHOME", None)
         env.pop("PYTHONPATH", None)
         return env
+
+    def _verbose(self, msg: str, *args):
+        if self.debug_logging:
+            logger.info(msg, *args)
+        else:
+            logger.debug(msg, *args)
 
     def stop_clipboard_owner(self):
         if self.clipboard_owner_proc is not None:
@@ -311,6 +318,7 @@ class VoiceInputService:
             "openai_model": "whisper-1",
             "groq_model": "whisper-large-v3",
             "enter_on_done": True,
+            "debug_logging": False,
         }
         if self.config_file.exists():
             try:
@@ -326,6 +334,10 @@ class VoiceInputService:
         cfg["groq_model"] = str(cfg.get("groq_model", "whisper-large-v3"))
         if isinstance(cfg.get("enter_on_done"), str):
             cfg["enter_on_done"] = cfg["enter_on_done"] in ("1", "true", "yes", "on")
+        if isinstance(cfg.get("debug_logging"), str):
+            cfg["debug_logging"] = cfg["debug_logging"].strip().lower() in ("1", "true", "yes", "on")
+        else:
+            cfg["debug_logging"] = bool(cfg.get("debug_logging", False))
         return cfg
 
     def _get_api(self):
@@ -345,7 +357,7 @@ class VoiceInputService:
 
     def _transcribe_request(self, language: str):
         provider, api_url, model, api_key, _cfg = self._get_api()
-        logger.info(
+        self._verbose(
             "transcribe request profile=%s provider=%s model=%s url=%s",
             self.transcription_provider,
             provider,
@@ -422,7 +434,7 @@ class VoiceInputService:
             raise RuntimeError(f"HTTP {e.code}: {err_body[:220]}")
         except urllib.error.URLError as e:
             raise RuntimeError(f"Transcription request failed: {str(e)[:220]}")
-        logger.info("transcribe provider=%s response len=%s", provider, len(out))
+        self._verbose("transcribe provider=%s response len=%s", provider, len(out))
         data = json.loads(out)
         err = data.get("error", {}).get("message")
         if err:
@@ -551,7 +563,7 @@ class VoiceInputService:
         return text
 
     def type_text(self, text: str, enter_mode: str):
-        logger.info("type_text len=%s enter_mode=%s", len(text), enter_mode)
+        self._verbose("type_text len=%s enter_mode=%s", len(text), enter_mode)
         pre_enter = enter_mode == "pre_post"
         post_enter = enter_mode in ("pre_post", "post_only")
         post_enter_delay = 0.35
@@ -566,7 +578,7 @@ class VoiceInputService:
         qdbus = next((self._tool_path(name) for name in ("qdbus", "qdbus6", "qdbus-qt5") if os.path.exists(self._tool_path(name))), None)
         is_gamemode = os.environ.get("XDG_SESSION_TYPE", "").lower() in {"wayland", "gamescope"} or bool(os.environ.get("STEAM_GAME"))
         has_non_ascii = any(ord(ch) > 127 for ch in text)
-        logger.info(
+        self._verbose(
             "type_text backends exists: ydotool=%s wtype=%s xdotool=%s socket=%s gamemode_hint=%s session=%s non_ascii=%s",
             os.path.exists(ydotool),
             os.path.exists(wtype),
@@ -953,6 +965,40 @@ class Plugin:
     listener_watch_running = False
 
     @staticmethod
+    def _terminate_duplicate_instances():
+        try:
+            self_pid = os.getpid()
+            script_path = str(Path(__file__).resolve())
+            out = subprocess.check_output(["pgrep", "-f", script_path], text=True, stderr=subprocess.DEVNULL)
+            pids = []
+            for line in out.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    pid = int(line)
+                except Exception:
+                    continue
+                if pid != self_pid:
+                    pids.append(pid)
+            if not pids:
+                return
+            logger.warning("duplicate plugin instances detected: %s", pids)
+            for pid in pids:
+                try:
+                    os.kill(pid, 15)
+                except Exception:
+                    pass
+            threading.Event().wait(0.25)
+            for pid in pids:
+                try:
+                    os.kill(pid, 9)
+                except Exception:
+                    pass
+        except Exception:
+            logger.exception("duplicate instance cleanup failed")
+
+    @staticmethod
     def ensure_ydotoold():
         try:
             ydotoold = Plugin.service._tool_path("ydotoold")
@@ -1140,12 +1186,15 @@ class Plugin:
     async def _main(self):
         try:
             logger.info("AI Speech-to-Text initialized")
+            Plugin._terminate_duplicate_instances()
             print("AISpeechToText: _main init", flush=True)
             ok = Plugin.ensure_ydotoold()
             logger.info("ensure_ydotoold=%s", ok)
             print(f"AISpeechToText: ensure_ydotoold={ok}", flush=True)
             cfg = Plugin._load_button_cfg()
             Plugin._save_button_cfg(cfg)
+            runtime_cfg = Plugin.service.load_config()
+            Plugin.service.debug_logging = bool(runtime_cfg.get("debug_logging", False))
             profile, _has_profile, _app_key = Plugin._effective_profile(cfg)
             Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
@@ -1191,6 +1240,8 @@ class Plugin:
 
     async def get_status(self):
         cfg = Plugin._load_button_cfg()
+        runtime_cfg = Plugin.service.load_config()
+        Plugin.service.debug_logging = bool(runtime_cfg.get("debug_logging", False))
         profile, has_profile, app_key = Plugin._effective_profile(cfg)
         tx_cfg = Plugin.service._load_transcription_profiles_config()
         tx_active = Plugin.service._load_transcription_provider(profile.get("transcription_profile", "Grok Whisper Large v3"))
@@ -1205,6 +1256,7 @@ class Plugin:
             "enabled": Plugin._effective_enabled(cfg),
             "last_text": Plugin.service.last_text,
             "last_error": Plugin.service.last_error,
+            "debug_logging": Plugin.service.debug_logging,
             "buttons": profile["buttons"],
             "enter_mode": profile.get("enter_mode", "pre_post"),
             "global": cfg["global"],
@@ -1380,7 +1432,28 @@ class Plugin:
             elif lvl == "warn":
                 logger.warning("FRONTEND %s", message)
             else:
-                logger.info("FRONTEND %s", message)
+                if Plugin.service.debug_logging:
+                    logger.info("FRONTEND %s", message)
             return {"success": True}
         except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def set_debug_logging(self, enabled: bool = False):
+        try:
+            cfg = Plugin.service.load_config()
+            cfg["debug_logging"] = bool(enabled)
+            lines = [
+                f'provider="{cfg.get("provider", "groq")}"',
+                'language="auto"',
+                f'openai_model="{cfg.get("openai_model", "whisper-1")}"',
+                f'groq_model="{cfg.get("groq_model", "whisper-large-v3")}"',
+                f'enter_on_done={"true" if bool(cfg.get("enter_on_done", True)) else "false"}',
+                f'debug_logging={"true" if bool(cfg.get("debug_logging", False)) else "false"}',
+            ]
+            Plugin.service.config_file.parent.mkdir(parents=True, exist_ok=True)
+            Plugin.service.config_file.write_text("\n".join(lines) + "\n")
+            Plugin.service.debug_logging = bool(enabled)
+            return {"success": True, "debug_logging": Plugin.service.debug_logging}
+        except Exception as e:
+            logger.exception("set_debug_logging failed")
             return {"success": False, "error": str(e)}

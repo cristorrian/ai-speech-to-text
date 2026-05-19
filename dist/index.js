@@ -221,9 +221,8 @@
           }
       };
       React.useEffect(() => {
-          flog("info", "frontend mounted");
           refresh();
-          const t = setInterval(refresh, 1000);
+          const t = setInterval(refresh, 2000);
           return () => clearInterval(t);
       }, []);
       const enableGameProfile = async (enabled) => {
