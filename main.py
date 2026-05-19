@@ -210,6 +210,22 @@ class VoiceInputService:
                     "api_key": "",
                     "api_url": "https://api.openai.com/v1/audio/transcriptions",
                 },
+                {
+                    "name": "OpenRouter Whisper Large v3 Turbo",
+                    "provider": "openrouter",
+                    "model": "openai/whisper-large-v3-turbo",
+                    "language": "auto",
+                    "api_key": "",
+                    "api_url": "https://openrouter.ai/api/v1/audio/transcriptions",
+                },
+                {
+                    "name": "OpenRouter Voxtral Mini Transcribe",
+                    "provider": "openrouter",
+                    "model": "mistralai/voxtral-mini-transcribe",
+                    "language": "auto",
+                    "api_key": "",
+                    "api_url": "https://openrouter.ai/api/v1/audio/transcriptions",
+                },
             ],
         }
 
