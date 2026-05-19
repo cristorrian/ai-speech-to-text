@@ -43,11 +43,8 @@ This project supports three install paths. They all install the same plugin:
 /home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json
 ```
 
-Important:
-- Use the release asset ZIP (packaged plugin), not GitHub's automatic "Source code (zip)".
-- The release ZIP already includes the exact Decky runtime layout.
-- After install, configure your API keys in:
-  `/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json`
+After install, configure your API keys in:
+`/home/deck/homebrew/settings/ai-speech-to-text/transcription_profiles.json`
 
 ### Alternative: One-click installer in Desktop Mode 🖱️
 
