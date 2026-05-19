@@ -26,6 +26,7 @@ Official install method: one-click desktop launcher.
 Use `Install AI Speech-to-Text.desktop` from this repository.
 
 - Double-click the file in Desktop Mode.
+- If you downloaded it with Firefox and the filename ends in `.desktop.download`, rename it to end exactly in `.desktop` before running it.
 - It downloads `install-from-github.sh` from this repo and runs it in a terminal.
 - The script installs the plugin to `/home/deck/homebrew/plugins/ai-speech-to-text`, seeds default settings if missing, restarts Decky, and restarts Steam.
 - It asks for sudo password when required.
