@@ -4,20 +4,41 @@ set -euo pipefail
 PLUGIN_NAME="ai-speech-to-text"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="/home/deck/homebrew/plugins/${PLUGIN_NAME}"
+SETTINGS_DIR="/home/deck/homebrew/settings/${PLUGIN_NAME}"
 
 echo "Installing ${PLUGIN_NAME} to ${DEST_DIR}"
 mkdir -p "${DEST_DIR}"
+mkdir -p "${SETTINGS_DIR}"
+
+for required in plugin.json package.json main.py dist; do
+  if [[ ! -e "${SRC_DIR}/${required}" ]]; then
+    echo "Invalid plugin source dir: missing ${required}" >&2
+    exit 1
+  fi
+done
 
 EXISTING_PROFILES=""
-if [[ -f "${DEST_DIR}/config/transcription_profiles.json" ]]; then
+if [[ -f "${SETTINGS_DIR}/transcription_profiles.json" ]]; then
   EXISTING_PROFILES="$(mktemp)"
-  cp "${DEST_DIR}/config/transcription_profiles.json" "${EXISTING_PROFILES}"
+  cp "${SETTINGS_DIR}/transcription_profiles.json" "${EXISTING_PROFILES}"
 fi
 
-cp -r "${SRC_DIR}"/* "${DEST_DIR}/"
+# Install plugin payload, excluding dev artifacts that bloat installs.
+rsync -a --delete \
+  --exclude '.git/' \
+  --exclude 'node_modules/' \
+  --exclude '__pycache__/' \
+  --exclude 'logs/' \
+  "${SRC_DIR}/" "${DEST_DIR}/"
 
-if [[ -n "${EXISTING_PROFILES}" && -f "${DEST_DIR}/config/transcription_profiles.json" ]]; then
-  python3 - "${EXISTING_PROFILES}" "${DEST_DIR}/config/transcription_profiles.json" <<'PY'
+# Seed settings template if missing.
+if [[ -f "${DEST_DIR}/config/transcription_profiles.json" && ! -f "${SETTINGS_DIR}/transcription_profiles.json" ]]; then
+  cp -a "${DEST_DIR}/config/transcription_profiles.json" "${SETTINGS_DIR}/transcription_profiles.json"
+fi
+
+# If the settings file exists, merge API keys forward when the template changes.
+if [[ -n "${EXISTING_PROFILES}" && -f "${SETTINGS_DIR}/transcription_profiles.json" ]]; then
+  python3 - "${EXISTING_PROFILES}" "${SETTINGS_DIR}/transcription_profiles.json" <<'PY'
 import json
 import sys
 from pathlib import Path
