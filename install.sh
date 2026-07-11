@@ -6,8 +6,27 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="/home/deck/homebrew/plugins/${PLUGIN_NAME}"
 SETTINGS_DIR="/home/deck/homebrew/settings/${PLUGIN_NAME}"
 
+run_root() {
+  if [[ "${EUID}" -eq 0 ]]; then
+    "$@"
+  else
+    sudo "$@"
+  fi
+}
+
+run_user_systemctl() {
+  local user="${SUDO_USER:-${USER:-deck}}"
+  if [[ "${EUID}" -eq 0 && "${user}" != "root" ]]; then
+    local uid
+    uid="$(id -u "${user}")"
+    sudo -u "${user}" XDG_RUNTIME_DIR="/run/user/${uid}" systemctl --user "$@"
+  else
+    systemctl --user "$@"
+  fi
+}
+
 echo "Installing ${PLUGIN_NAME} to ${DEST_DIR}"
-mkdir -p "${DEST_DIR}"
+run_root mkdir -p "${DEST_DIR}"
 mkdir -p "${SETTINGS_DIR}"
 
 for required in plugin.json package.json main.py dist; do
@@ -24,7 +43,7 @@ if [[ -f "${SETTINGS_DIR}/transcription_profiles.json" ]]; then
 fi
 
 # Install plugin payload, excluding dev artifacts that bloat installs.
-rsync -a --delete \
+run_root rsync -a --delete \
   --exclude '.git/' \
   --exclude 'node_modules/' \
   --exclude '__pycache__/' \
@@ -96,4 +115,10 @@ PY
   rm -f "${EXISTING_PROFILES}"
 fi
 
-echo "Done. Restart Decky Loader to load the plugin."
+echo "Restarting Decky Loader"
+run_root systemctl restart plugin_loader.service
+
+echo "Restarting Steam client"
+run_user_systemctl restart app-steam@autostart.service
+
+echo "Done. Plugin installed and services restarted."

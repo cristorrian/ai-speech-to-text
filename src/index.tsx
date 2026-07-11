@@ -14,25 +14,31 @@ import React from "react";
 import { FaMicrophone } from "react-icons/fa";
 import { useEffect, useRef, useState } from "react";
 
-const BUTTON_OPTIONS = ["L1", "R1", "L2", "R2", "L3", "R3", "A", "B", "X", "Y", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"];
-const DROPDOWN_OPTIONS = BUTTON_OPTIONS.map((button) => ({ data: button, label: button }));
+const STEAM_DECK_BUTTONS = [
+  "A", "B", "X", "Y",
+  "L1", "R1", "L2", "R2", "L3", "R3",
+  "L4", "R4", "L5", "R5",
+  "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
+  "SELECT", "START", "STEAM", "QAM",
+  "LEFT_PAD_CLICK", "RIGHT_PAD_CLICK",
+];
+const STEAM_DECK_BUTTON_LABELS: Record<string, string> = {
+  DPAD_UP: "D-Pad Up",
+  DPAD_DOWN: "D-Pad Down",
+  DPAD_LEFT: "D-Pad Left",
+  DPAD_RIGHT: "D-Pad Right",
+  LEFT_PAD_CLICK: "Left Pad Click",
+  RIGHT_PAD_CLICK: "Right Pad Click",
+};
+const STEAM_DECK_BUTTON_OPTIONS = STEAM_DECK_BUTTONS.map((button) => ({ data: button, label: STEAM_DECK_BUTTON_LABELS[button] || button }));
 const ENTER_MODE_OPTIONS = [
   { data: "pre_post", label: "Enter before and after" },
   { data: "post_only", label: "Enter only at end" },
+  { data: "t_post", label: "T to open, Enter at end" },
   { data: "none", label: "No automatic Enter" },
 ];
 
-const normalizeButtons = (next: string[]) => {
-  const normalized = next.filter((button) => BUTTON_OPTIONS.includes(button));
-  const first = normalized[0] || "L1";
-  let second = normalized[1] || "R1";
-
-  if (second === first) {
-    second = BUTTON_OPTIONS.find((button) => button !== first) || "R1";
-  }
-
-  return [first, second];
-};
+const normalizeSteamDeckButton = (next: string) => STEAM_DECK_BUTTONS.includes(next) ? next : "L5";
 
 const getActiveGame = async () => {
   try {
@@ -81,10 +87,12 @@ const getActiveGame = async () => {
 function Content({ serverAPI }: { serverAPI: ServerAPI }) {
   const [recording, setRecording] = useState(false);
   const [enabled, setEnabled] = useState(false);
-  const [buttons, setButtons] = useState<string[]>(["L1", "R1"]);
+  const [steamDeckButton, setSteamDeckButton] = useState("L5");
   const [lastError, setLastError] = useState("");
   const [lastText, setLastText] = useState("");
   const [enterMode, setEnterMode] = useState("pre_post");
+  const [translateToEnglish, setTranslateToEnglish] = useState(false);
+  const [remotePlayTyping, setRemotePlayTyping] = useState(false);
   const [activeAppId, setActiveAppId] = useState("");
   const [activeAppName, setActiveAppName] = useState("");
   const [hasGameProfile, setHasGameProfile] = useState(false);
@@ -101,8 +109,8 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
     await serverAPI.callPluginMethod("set_active_game", { app_id: appId, app_name: appName });
   };
 
-  const updateButtons = async (next: string[]) => {
-    await serverAPI.callPluginMethod("set_button_config", { buttons: normalizeButtons(next) });
+  const updateSteamDeckButton = async (next: string) => {
+    await serverAPI.callPluginMethod("set_steam_deck_button", { button: normalizeSteamDeckButton(next) });
     await refresh();
   };
 
@@ -121,8 +129,10 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
       if (st?.success) {
         setRecording(!!st.result.recording);
         setEnabled(!!st.result.enabled);
-        if (Array.isArray(st.result.buttons)) setButtons(normalizeButtons(st.result.buttons));
+        setSteamDeckButton(normalizeSteamDeckButton(String(st.result.steam_deck_button || "L5")));
         setEnterMode(String(st.result.enter_mode || "pre_post"));
+        setTranslateToEnglish(!!st.result.translate_to_english);
+        setRemotePlayTyping(!!st.result.remote_play_typing);
         setActiveAppId(String(st.result.active_app_id || ""));
         setActiveAppName(String(st.result.active_app_name || ""));
         setHasGameProfile(!!st.result.has_game_profile);
@@ -207,7 +217,7 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
         </PanelSectionRow>
       ) : null}
       <PanelSectionRow>
-        <div className={staticClasses.Text}>PTT: hold {buttons.join("+")} to record</div>
+        <div className={staticClasses.Text}>PTT: hold {steamDeckButton} to record</div>
       </PanelSectionRow>
       <PanelSectionRow>
         <div className={staticClasses.Text}>Game: {activeAppName || (activeAppId ? activeAppId : "none")}</div>
@@ -247,24 +257,34 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
         />
       </PanelSectionRow>
       <PanelSectionRow>
-        <DropdownItem
-          label="Button 1"
-          layout="below"
-          rgOptions={DROPDOWN_OPTIONS}
-          selectedOption={buttons[0] || "L1"}
-          onChange={async (option: SingleDropdownOption) => {
-            await updateButtons([String(option.data), buttons[1] || "R1"]);
+        <ToggleField
+          label="Translate to English"
+          checked={translateToEnglish}
+          onChange={async (enabled) => {
+            await serverAPI.callPluginMethod("set_translate_to_english", { enabled });
+            await refresh();
+          }}
+        />
+      </PanelSectionRow>
+      <PanelSectionRow>
+        <ToggleField
+          label="Remote Play typing"
+          description="Types text as keyboard events without using the clipboard."
+          checked={remotePlayTyping}
+          onChange={async (enabled) => {
+            await serverAPI.callPluginMethod("set_remote_play_typing", { enabled });
+            await refresh();
           }}
         />
       </PanelSectionRow>
       <PanelSectionRow>
         <DropdownItem
-          label="Button 2"
+          label="Steam Deck button"
           layout="below"
-          rgOptions={DROPDOWN_OPTIONS}
-          selectedOption={buttons[1] || "R1"}
+          rgOptions={STEAM_DECK_BUTTON_OPTIONS}
+          selectedOption={steamDeckButton}
           onChange={async (option: SingleDropdownOption) => {
-            await updateButtons([buttons[0] || "L1", String(option.data)]);
+            await updateSteamDeckButton(String(option.data));
           }}
         />
       </PanelSectionRow>
@@ -296,6 +316,7 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
 
 export default definePlugin((serverAPI: ServerAPI) => {
   let lastKnownApp = "";
+
   const syncActiveGame = async () => {
     try {
       const { appId, appName } = await getActiveGame();

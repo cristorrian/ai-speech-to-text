@@ -2,11 +2,13 @@ import json
 import logging
 import unicodedata
 import base64
+import fcntl
 import os
 import subprocess
 import tempfile
 import threading
 import sys
+import struct
 import traceback
 import shutil
 import urllib.error
@@ -43,8 +45,92 @@ logging.basicConfig(
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-BUTTON_OPTIONS = ["L1", "R1", "L2", "R2", "L3", "R3", "A", "B", "X", "Y", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"]
-ENTER_MODE_OPTIONS = ("pre_post", "post_only", "none")
+STEAM_DECK_BUTTON_OPTIONS = (
+    "A", "B", "X", "Y",
+    "L1", "R1", "L2", "R2", "L3", "R3",
+    "L4", "R4", "L5", "R5",
+    "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
+    "SELECT", "START", "STEAM", "QAM",
+    "LEFT_PAD_CLICK", "RIGHT_PAD_CLICK",
+)
+ENTER_MODE_OPTIONS = ("pre_post", "post_only", "t_post", "none")
+
+EV_SYN = 0
+EV_KEY = 1
+SYN_REPORT = 0
+BUS_USB = 0x03
+UI_SET_EVBIT = 0x40045564
+UI_SET_KEYBIT = 0x40045565
+UI_DEV_CREATE = 0x5501
+UI_DEV_DESTROY = 0x5502
+UI_DEV_SETUP = 0x405C5503
+
+KEY_ESC = 1
+KEY_1 = 2
+KEY_2 = 3
+KEY_3 = 4
+KEY_4 = 5
+KEY_5 = 6
+KEY_6 = 7
+KEY_7 = 8
+KEY_8 = 9
+KEY_9 = 10
+KEY_0 = 11
+KEY_MINUS = 12
+KEY_EQUAL = 13
+KEY_BACKSPACE = 14
+KEY_TAB = 15
+KEY_Q = 16
+KEY_W = 17
+KEY_E = 18
+KEY_R = 19
+KEY_T = 20
+KEY_Y = 21
+KEY_U = 22
+KEY_I = 23
+KEY_O = 24
+KEY_P = 25
+KEY_LEFTBRACE = 26
+KEY_RIGHTBRACE = 27
+KEY_ENTER = 28
+KEY_LEFTCTRL = 29
+KEY_A = 30
+KEY_S = 31
+KEY_D = 32
+KEY_F = 33
+KEY_G = 34
+KEY_H = 35
+KEY_J = 36
+KEY_K = 37
+KEY_L = 38
+KEY_SEMICOLON = 39
+KEY_APOSTROPHE = 40
+KEY_GRAVE = 41
+KEY_LEFTSHIFT = 42
+KEY_BACKSLASH = 43
+KEY_Z = 44
+KEY_X = 45
+KEY_C = 46
+KEY_V = 47
+KEY_B = 48
+KEY_N = 49
+KEY_M = 50
+KEY_COMMA = 51
+KEY_DOT = 52
+KEY_SLASH = 53
+KEY_RIGHTSHIFT = 54
+KEY_LEFTALT = 56
+KEY_SPACE = 57
+KEY_RIGHTCTRL = 97
+KEY_RIGHTALT = 100
+
+LETTER_KEY_CODES = {
+    "a": KEY_A, "b": KEY_B, "c": KEY_C, "d": KEY_D, "e": KEY_E, "f": KEY_F,
+    "g": KEY_G, "h": KEY_H, "i": KEY_I, "j": KEY_J, "k": KEY_K, "l": KEY_L,
+    "m": KEY_M, "n": KEY_N, "o": KEY_O, "p": KEY_P, "q": KEY_Q, "r": KEY_R,
+    "s": KEY_S, "t": KEY_T, "u": KEY_U, "v": KEY_V, "w": KEY_W, "x": KEY_X,
+    "y": KEY_Y, "z": KEY_Z,
+}
 
 
 def _install_runtime_exception_hooks():
@@ -89,12 +175,15 @@ class VoiceInputService:
         self.last_error = ""
         self.last_method = ""
         self.enter_mode = "pre_post"
+        self.translate_to_english = False
+        self.remote_play_typing = False
         self.transcription_provider = "grok"
         self.debug_logging = False
         self.active_app_id = ""
         self.active_app_name = ""
         self.clipboard_owner_proc = None
         self.clipboard_owner_tmp = None
+        self.virtual_keyboard = None
 
     def _plugin_dir(self):
         return Path(os.environ.get("DECKY_PLUGIN_DIR") or Path(__file__).resolve().parent)
@@ -104,6 +193,80 @@ class VoiceInputService:
         if bundled.exists():
             return str(bundled)
         return shutil.which(name) or f"/usr/bin/{name}"
+
+    def close_virtual_keyboard(self):
+        if self.virtual_keyboard is not None:
+            try:
+                fcntl.ioctl(self.virtual_keyboard, UI_DEV_DESTROY)
+            except Exception:
+                pass
+            try:
+                os.close(self.virtual_keyboard)
+            except Exception:
+                pass
+            self.virtual_keyboard = None
+
+    def ensure_virtual_keyboard(self):
+        try:
+            if self.virtual_keyboard is None:
+                keys = [
+                    *LETTER_KEY_CODES.values(),
+                    KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0,
+                    KEY_SPACE, KEY_ENTER, KEY_MINUS, KEY_EQUAL,
+                    KEY_LEFTBRACE, KEY_RIGHTBRACE, KEY_BACKSLASH,
+                    KEY_SEMICOLON, KEY_APOSTROPHE, KEY_GRAVE,
+                    KEY_COMMA, KEY_DOT, KEY_SLASH,
+                    KEY_ESC, KEY_TAB, KEY_BACKSPACE,
+                    KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
+                    KEY_LEFTCTRL, KEY_RIGHTCTRL,
+                    KEY_LEFTALT, KEY_RIGHTALT,
+                ]
+                fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+                try:
+                    fcntl.ioctl(fd, UI_SET_EVBIT, EV_KEY)
+                    fcntl.ioctl(fd, UI_SET_EVBIT, EV_SYN)
+                    for key_code in keys:
+                        fcntl.ioctl(fd, UI_SET_KEYBIT, int(key_code))
+                    name = b"AI Speech-to-Text Virtual Keyboard"
+                    setup = struct.pack("HHHH80sI", BUS_USB, 0x1209, 0x0001, 1, name, 0)
+                    fcntl.ioctl(fd, UI_DEV_SETUP, setup)
+                    fcntl.ioctl(fd, UI_DEV_CREATE)
+                except Exception:
+                    os.close(fd)
+                    raise
+                self.virtual_keyboard = fd
+                logger.info("virtual keyboard created via raw uinput")
+                threading.Event().wait(0.5)
+            return True
+        except Exception:
+            logger.exception("virtual keyboard creation failed")
+            self.close_virtual_keyboard()
+            return False
+
+    def _virtual_keyboard_event(self, event_type, code, value):
+        event = struct.pack("llHHi", 0, 0, int(event_type), int(code), int(value))
+        os.write(self.virtual_keyboard, event)
+
+    def _virtual_keyboard_syn(self):
+        self._virtual_keyboard_event(EV_SYN, SYN_REPORT, 0)
+
+    def _virtual_keyboard_key(self, key_code, shifted=False, hold=0.01):
+        if self.virtual_keyboard is None and not self.ensure_virtual_keyboard():
+            raise RuntimeError("Virtual keyboard is not available")
+        if shifted:
+            self._virtual_keyboard_event(EV_KEY, KEY_LEFTSHIFT, 1)
+            self._virtual_keyboard_syn()
+            threading.Event().wait(hold)
+        self._virtual_keyboard_event(EV_KEY, key_code, 1)
+        self._virtual_keyboard_syn()
+        threading.Event().wait(hold)
+        self._virtual_keyboard_event(EV_KEY, key_code, 0)
+        self._virtual_keyboard_syn()
+        if shifted:
+            threading.Event().wait(hold)
+            self._virtual_keyboard_event(EV_KEY, KEY_LEFTSHIFT, 0)
+            self._virtual_keyboard_syn()
+        threading.Event().wait(hold)
 
     def _runtime_env(self):
         env = os.environ.copy()
@@ -355,13 +518,27 @@ class VoiceInputService:
             raise RuntimeError("Missing api_key in transcription profile")
         return provider, api_url, model, api_key, cfg
 
+    @staticmethod
+    def _resolve_audio_endpoint(provider: str, api_url: str, translate_to_english: bool):
+        normalized_url = api_url.rstrip("/")
+        is_openrouter = (provider == "openrouter") or ("openrouter.ai" in normalized_url.lower())
+        translation_url = normalized_url[:-len("/transcriptions")] + "/translations" if normalized_url.endswith("/transcriptions") else ""
+
+        if translate_to_english:
+            if is_openrouter or not translation_url:
+                raise RuntimeError("The selected transcription endpoint does not support audio translation to English")
+            return translation_url, True
+        return api_url, False
+
     def _transcribe_request(self, language: str):
         provider, api_url, model, api_key, _cfg = self._get_api()
+        api_url, translating = self._resolve_audio_endpoint(provider, api_url, self.translate_to_english)
         self._verbose(
-            "transcribe request profile=%s provider=%s model=%s url=%s",
+            "audio request profile=%s provider=%s model=%s translating=%s url=%s",
             self.transcription_provider,
             provider,
             model,
+            translating,
             api_url,
         )
         audio_bytes = self.audio_file.read_bytes()
@@ -375,7 +552,7 @@ class VoiceInputService:
                     "format": "wav",
                 },
             }
-            if language and language != "auto":
+            if language and language != "auto" and not translating:
                 payload["language"] = language
             body = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -396,7 +573,7 @@ class VoiceInputService:
                 ("model", model),
                 ("response_format", "json"),
             ]
-            if language and language != "auto":
+            if language and language != "auto" and not translating:
                 fields.append(("language", language))
 
             body = bytearray()
@@ -565,7 +742,8 @@ class VoiceInputService:
     def type_text(self, text: str, enter_mode: str):
         self._verbose("type_text len=%s enter_mode=%s", len(text), enter_mode)
         pre_enter = enter_mode == "pre_post"
-        post_enter = enter_mode in ("pre_post", "post_only")
+        pre_t = enter_mode == "t_post"
+        post_enter = enter_mode in ("pre_post", "post_only", "t_post")
         post_enter_delay = 0.35
         env = self._runtime_env()
         env["YDOTOOL_SOCKET"] = "/tmp/.ydotool_socket"
@@ -589,23 +767,33 @@ class VoiceInputService:
             has_non_ascii,
         )
 
-        def _pre_enter() -> bool:
-            # Pre-enter can open a chat box before inserting text.
+        def _pre_text_input() -> bool:
+            # Pre-enter or pre-T can open a chat box before inserting text.
+            if not (pre_enter or pre_t):
+                return True
+            key_label = "Return" if pre_enter else "t"
+            ydotool_codes = ["28:1", "28:0"] if pre_enter else ["20:1", "20:0"]
+            virtual_key = KEY_ENTER if pre_enter else KEY_T
+            if self.remote_play_typing and self.ensure_virtual_keyboard():
+                self._virtual_keyboard_key(virtual_key)
+                logger.info("type_text pre-%s via virtual keyboard", key_label)
+                threading.Event().wait(0.05)
+                return True
             if os.path.exists(ydotool):
-                r = subprocess.run([ydotool, "key", "28:1", "28:0"], env=env, check=False)
-                logger.info("type_text pre-enter via ydotool rc=%s", r.returncode)
+                r = subprocess.run([ydotool, "key", *ydotool_codes], env=env, check=False)
+                logger.info("type_text pre-%s via ydotool rc=%s", key_label, r.returncode)
                 if r.returncode == 0:
                     threading.Event().wait(0.05)
                     return True
             if os.path.exists(wtype):
-                r = subprocess.run([wtype, "-k", "Return"], env=env, check=False)
-                logger.info("type_text pre-enter via wtype rc=%s", r.returncode)
+                r = subprocess.run([wtype, "-k", key_label], env=env, check=False)
+                logger.info("type_text pre-%s via wtype rc=%s", key_label, r.returncode)
                 if r.returncode == 0:
                     threading.Event().wait(0.05)
                     return True
             if os.path.exists(xdotool):
-                r = subprocess.run([xdotool, "key", "Return"], env=env, check=False)
-                logger.info("type_text pre-enter via xdotool rc=%s", r.returncode)
+                r = subprocess.run([xdotool, "key", key_label], env=env, check=False)
+                logger.info("type_text pre-%s via xdotool rc=%s", key_label, r.returncode)
                 if r.returncode == 0:
                     threading.Event().wait(0.05)
                     return True
@@ -686,6 +874,136 @@ class VoiceInputService:
                     return False
             self.last_method = "xdotool-type"
             return True
+
+        def _try_remote_play_es_es_xdotool() -> bool:
+            if not os.path.exists(xdotool):
+                return False
+            logger.info("type_text backend=remote-play-es-es-xdotool start")
+
+            special_keys = {
+                "ñ": ["key", "semicolon"],
+                "Ñ": ["key", "shift+semicolon"],
+                "á": ["key", "apostrophe", "a"],
+                "é": ["key", "apostrophe", "e"],
+                "í": ["key", "apostrophe", "i"],
+                "ó": ["key", "apostrophe", "o"],
+                "ú": ["key", "apostrophe", "u"],
+                "Á": ["key", "apostrophe", "shift+a"],
+                "É": ["key", "apostrophe", "shift+e"],
+                "Í": ["key", "apostrophe", "shift+i"],
+                "Ó": ["key", "apostrophe", "shift+o"],
+                "Ú": ["key", "apostrophe", "shift+u"],
+                "ü": ["key", "shift+apostrophe", "u"],
+                "Ü": ["key", "shift+apostrophe", "shift+u"],
+                "¡": ["key", "equal"],
+                "¿": ["key", "shift+equal"],
+                "?": ["key", "shift+minus"],
+            }
+
+            def _flush(buffer: list[str]) -> bool:
+                if not buffer:
+                    return True
+                chunk = "".join(buffer)
+                buffer.clear()
+                r = subprocess.run([xdotool, "type", "--delay", "0", "--", chunk], env=env, check=False)
+                logger.info("type_text remote-play-es-es ascii chunk len=%s rc=%s", len(chunk), r.returncode)
+                return r.returncode == 0
+
+            buffer: list[str] = []
+            for ch in text:
+                seq = special_keys.get(ch)
+                if seq:
+                    if not _flush(buffer):
+                        return False
+                    r = subprocess.run([xdotool] + seq, env=env, check=False)
+                    logger.info("type_text remote-play-es-es char=%s seq=%s rc=%s", ch, "+".join(seq[1:]), r.returncode)
+                    if r.returncode != 0:
+                        return False
+                    threading.Event().wait(0.02)
+                elif ord(ch) < 128:
+                    buffer.append(ch)
+                else:
+                    normalized = unicodedata.normalize("NFKD", ch).encode("ascii", "ignore").decode("ascii")
+                    buffer.append(normalized or "?")
+            if not _flush(buffer):
+                return False
+
+            if post_enter:
+                _delay_before_post_enter("remote-play-es-es-xdotool")
+                r2 = subprocess.run([xdotool, "key", "Return"], env=env, check=False)
+                logger.info("type_text remote-play-es-es enter rc=%s", r2.returncode)
+                if r2.returncode != 0:
+                    return False
+            self.last_method = "remote-play-es-es-xdotool-type"
+            return True
+
+        def _try_remote_play_uinput_keyboard() -> bool:
+            try:
+                if not self.ensure_virtual_keyboard():
+                    return False
+                logger.info("type_text backend=remote-play-uinput-keyboard start")
+
+                keymap = {
+                    **{letter: (key_code, False) for letter, key_code in LETTER_KEY_CODES.items()},
+                    **{letter.upper(): (key_code, True) for letter, key_code in LETTER_KEY_CODES.items()},
+                    "1": (KEY_1, False), "2": (KEY_2, False), "3": (KEY_3, False),
+                    "4": (KEY_4, False), "5": (KEY_5, False), "6": (KEY_6, False),
+                    "7": (KEY_7, False), "8": (KEY_8, False), "9": (KEY_9, False),
+                    "0": (KEY_0, False),
+                    " ": (KEY_SPACE, False), ".": (KEY_DOT, False), ",": (KEY_COMMA, False),
+                    "-": (KEY_MINUS, False), "_": (KEY_MINUS, True),
+                    "?": (KEY_MINUS, True), "!": (KEY_EQUAL, False),
+                    "¿": (KEY_EQUAL, True), "¡": (KEY_EQUAL, False),
+                    ":": (KEY_DOT, True), ";": (KEY_COMMA, True),
+                    "/": (KEY_7, True), "(": (KEY_8, True), ")": (KEY_9, True),
+                }
+                accent_map = {
+                    "á": ("a", False), "é": ("e", False), "í": ("i", False), "ó": ("o", False), "ú": ("u", False),
+                    "Á": ("a", True), "É": ("e", True), "Í": ("i", True), "Ó": ("o", True), "Ú": ("u", True),
+                }
+
+                def _press_char(ch: str) -> bool:
+                    if ch in accent_map:
+                        base, shifted = accent_map[ch]
+                        self._virtual_keyboard_key(KEY_APOSTROPHE)
+                        self._virtual_keyboard_key(LETTER_KEY_CODES[base], shifted)
+                        return True
+                    if ch == "ñ":
+                        self._virtual_keyboard_key(KEY_SEMICOLON)
+                        return True
+                    if ch == "Ñ":
+                        self._virtual_keyboard_key(KEY_SEMICOLON, True)
+                        return True
+                    if ch == "ü":
+                        self._virtual_keyboard_key(KEY_APOSTROPHE, True)
+                        self._virtual_keyboard_key(KEY_U)
+                        return True
+                    if ch == "Ü":
+                        self._virtual_keyboard_key(KEY_APOSTROPHE, True)
+                        self._virtual_keyboard_key(KEY_U, True)
+                        return True
+                    entry = keymap.get(ch)
+                    if entry:
+                        self._virtual_keyboard_key(entry[0], entry[1])
+                        return True
+                    normalized = unicodedata.normalize("NFKD", ch).encode("ascii", "ignore").decode("ascii")
+                    for fallback in normalized or "?":
+                        if not _press_char(fallback):
+                            return False
+                    return True
+
+                for ch in text:
+                    if not _press_char(ch):
+                        return False
+                if post_enter:
+                    _delay_before_post_enter("remote-play-uinput-keyboard")
+                    self._virtual_keyboard_key(KEY_ENTER)
+                self.last_method = "remote-play-uinput-keyboard"
+                return True
+            except Exception:
+                logger.exception("type_text remote-play-uinput-keyboard failed")
+                self.close_virtual_keyboard()
+                return False
 
         def _try_clipboard_paste() -> bool:
             payload = text.encode("utf-8", errors="strict")
@@ -910,8 +1228,16 @@ class VoiceInputService:
             return False
 
         try:
-            if pre_enter:
-                _pre_enter()
+            if self.remote_play_typing:
+                logger.info("type_text remote_play_typing enabled: clipboard disabled")
+                _pre_text_input()
+                if _try_remote_play_uinput_keyboard() or _try_remote_play_es_es_xdotool() or _try_ydotool() or _try_wtype() or _try_xdotool():
+                    self.last_error = ""
+                    return
+                self.last_error = "Remote Play typing failed (xdotool/ydotool/wtype unavailable)"
+                self.last_method = "remote-play-typing-failed"
+                return
+            _pre_text_input()
             # For accents and other non-ASCII characters, prefer clipboard insertion
             # to avoid keyboard layout degradation.
             if has_non_ascii:
@@ -1027,7 +1353,7 @@ class Plugin:
             "enabled": False,
             "active_app_id": "",
             "active_app_name": "",
-            "global": {"buttons": ["L1", "R1"], "enter_mode": "pre_post"},
+            "global": {"steam_deck_button": "L5", "enter_mode": "pre_post", "translate_to_english": False, "remote_play_typing": False},
             "profiles": {},
         }
         f = Plugin._button_cfg_file()
@@ -1049,7 +1375,7 @@ class Plugin:
 
     @staticmethod
     def _default_profile():
-        return {"buttons": ["L1", "R1"], "enter_mode": "pre_post", "transcription_profile": "Grok Whisper Large v3"}
+        return {"steam_deck_button": "L5", "enter_mode": "pre_post", "translate_to_english": False, "remote_play_typing": False, "transcription_profile": "Grok Whisper Large v3"}
 
     @staticmethod
     def _normalize_profile(profile):
@@ -1058,9 +1384,12 @@ class Plugin:
         mode = profile.get("enter_mode", "pre_post")
         if mode not in ENTER_MODE_OPTIONS:
             mode = "pre_post"
+        translate_to_english = bool(profile.get("translate_to_english", profile.get("translation_mode") == "english"))
         normalized = {
-            "buttons": Plugin._normalize_buttons(profile.get("buttons")),
+            "steam_deck_button": Plugin._normalize_steam_deck_button(profile.get("steam_deck_button")),
             "enter_mode": mode,
+            "translate_to_english": translate_to_english,
+            "remote_play_typing": bool(profile.get("remote_play_typing", False)),
             "transcription_profile": str(profile.get("transcription_profile", "Grok Whisper Large v3") or "Grok Whisper Large v3"),
         }
         if "enabled" in profile:
@@ -1108,15 +1437,9 @@ class Plugin:
         return bool(cfg.get("enabled", False))
 
     @staticmethod
-    def _normalize_buttons(buttons):
-        if not isinstance(buttons, list):
-            buttons = []
-        normalized = [button for button in buttons if button in BUTTON_OPTIONS]
-        first = normalized[0] if len(normalized) > 0 else "L1"
-        second = normalized[1] if len(normalized) > 1 else "R1"
-        if second == first:
-            second = next((button for button in BUTTON_OPTIONS if button != first), "R1")
-        return [first, second]
+    def _normalize_steam_deck_button(button):
+        button = str(button or "L5").strip().upper()
+        return button if button in STEAM_DECK_BUTTON_OPTIONS else "L5"
 
     @staticmethod
     def start_controller_listener():
@@ -1128,12 +1451,17 @@ class Plugin:
         env = os.environ.copy()
         # Do not force a fixed eventX path; SteamOS can change it between sessions.
         env.pop("VOICEINPUT_DEVICE_PATH", None)
-        Plugin.listener_process = subprocess.Popen(
-            ["/usr/bin/python3", str(listener)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=env,
-        )
+        env["PYTHONUNBUFFERED"] = "1"
+        listener_log = open(_decky_log_file(), "ab")
+        try:
+            Plugin.listener_process = subprocess.Popen(
+                ["/usr/bin/python3", str(listener)],
+                stdout=listener_log,
+                stderr=subprocess.STDOUT,
+                env=env,
+            )
+        finally:
+            listener_log.close()
         threading.Event().wait(0.4)
         alive = Plugin.listener_process.poll() is None
         logger.info("listener started pid=%s alive=%s", getattr(Plugin.listener_process, "pid", None), alive)
@@ -1198,9 +1526,13 @@ class Plugin:
             profile, _has_profile, _app_key = Plugin._effective_profile(cfg)
             Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
+            Plugin.service.translate_to_english = bool(profile.get("translate_to_english", False))
+            Plugin.service.remote_play_typing = bool(profile.get("remote_play_typing", False))
             Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
             Plugin.service.active_app_id = cfg.get("active_app_id", "")
             Plugin.service.active_app_name = cfg.get("active_app_name", "")
+            virtual_keyboard_ready = Plugin.service.ensure_virtual_keyboard()
+            logger.info("virtual keyboard ready=%s", virtual_keyboard_ready)
             started = True
             if Plugin.service.enabled:
                 started = Plugin.start_controller_listener()
@@ -1221,6 +1553,7 @@ class Plugin:
         Plugin.listener_watch_running = False
         Plugin.poll_running = False
         Plugin.service.stop_clipboard_owner()
+        Plugin.service.close_virtual_keyboard()
         Plugin.stop_controller_listener()
 
     async def set_enabled(self, enabled: bool):
@@ -1257,8 +1590,10 @@ class Plugin:
             "last_text": Plugin.service.last_text,
             "last_error": Plugin.service.last_error,
             "debug_logging": Plugin.service.debug_logging,
-            "buttons": profile["buttons"],
+            "steam_deck_button": profile.get("steam_deck_button", "L5"),
             "enter_mode": profile.get("enter_mode", "pre_post"),
+            "translate_to_english": bool(profile.get("translate_to_english", False)),
+            "remote_play_typing": bool(profile.get("remote_play_typing", False)),
             "global": cfg["global"],
             "profile": profile,
             "profiles": cfg.get("profiles", {}),
@@ -1277,25 +1612,21 @@ class Plugin:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def set_button_config(self, buttons: list):
+    async def set_steam_deck_button(self, button: str):
         try:
             cfg = Plugin._load_button_cfg()
-            unique = Plugin._normalize_buttons(buttons)
-            profile, has_profile, app_key = Plugin._effective_profile(cfg)
+            next_button = Plugin._normalize_steam_deck_button(button)
+            _profile, has_profile, app_key = Plugin._effective_profile(cfg)
             if has_profile and app_key:
-                cfg["profiles"][app_key]["buttons"] = unique
+                cfg["profiles"][app_key]["steam_deck_button"] = next_button
             else:
-                cfg["global"]["buttons"] = unique
+                cfg["global"]["steam_deck_button"] = next_button
             Plugin._save_button_cfg(cfg)
-            active_profile, _has_profile, _app_key = Plugin._effective_profile(cfg)
-            Plugin.service.enabled = Plugin._effective_enabled(cfg)
-            Plugin.service.enter_mode = active_profile.get("enter_mode", "pre_post")
-            Plugin.service.transcription_provider = active_profile.get("transcription_profile", "Grok Whisper Large v3")
             if Plugin.service.enabled:
                 Plugin.start_controller_listener()
             else:
                 Plugin.stop_controller_listener()
-            return {"success": True}
+            return {"success": True, "steam_deck_button": next_button}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -1319,6 +1650,34 @@ class Plugin:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    async def set_translate_to_english(self, enabled: bool):
+        try:
+            cfg = Plugin._load_button_cfg()
+            _profile, has_profile, app_key = Plugin._effective_profile(cfg)
+            if has_profile and app_key:
+                cfg["profiles"][app_key]["translate_to_english"] = bool(enabled)
+            else:
+                cfg["global"]["translate_to_english"] = bool(enabled)
+            Plugin._save_button_cfg(cfg)
+            Plugin.service.translate_to_english = bool(enabled)
+            return {"success": True, "translate_to_english": bool(enabled)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def set_remote_play_typing(self, enabled: bool):
+        try:
+            cfg = Plugin._load_button_cfg()
+            _profile, has_profile, app_key = Plugin._effective_profile(cfg)
+            if has_profile and app_key:
+                cfg["profiles"][app_key]["remote_play_typing"] = bool(enabled)
+            else:
+                cfg["global"]["remote_play_typing"] = bool(enabled)
+            Plugin._save_button_cfg(cfg)
+            Plugin.service.remote_play_typing = bool(enabled)
+            return {"success": True, "remote_play_typing": bool(enabled)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     async def set_active_game(self, app_id: str = "", app_name: str = ""):
         try:
             cfg = Plugin._load_button_cfg()
@@ -1331,6 +1690,8 @@ class Plugin:
                 Plugin.service.active_app_id = str(cfg.get("active_app_id", "") or "")
                 Plugin.service.active_app_name = str(cfg.get("active_app_name", "") or "")
                 Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
+                Plugin.service.translate_to_english = bool(profile.get("translate_to_english", False))
+                Plugin.service.remote_play_typing = bool(profile.get("remote_play_typing", False))
                 Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
                 return {"success": True, "has_game_profile": has_profile, "profile": profile, "active_app_id": existing_key}
             previous_profile, _previous_has_profile, _previous_key = Plugin._effective_profile(cfg)
@@ -1342,9 +1703,11 @@ class Plugin:
             Plugin.service.active_app_id = app_key
             Plugin.service.active_app_name = app_title
             Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
+            Plugin.service.translate_to_english = bool(profile.get("translate_to_english", False))
+            Plugin.service.remote_play_typing = bool(profile.get("remote_play_typing", False))
             Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
             if Plugin.service.enabled:
-                if profile.get("buttons") != previous_profile.get("buttons"):
+                if profile.get("steam_deck_button") != previous_profile.get("steam_deck_button"):
                     Plugin.start_controller_listener()
             else:
                 Plugin.stop_controller_listener()
@@ -1375,6 +1738,8 @@ class Plugin:
             Plugin.service.active_app_id = app_key
             Plugin.service.active_app_name = cfg["active_app_name"]
             Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
+            Plugin.service.translate_to_english = bool(profile.get("translate_to_english", False))
+            Plugin.service.remote_play_typing = bool(profile.get("remote_play_typing", False))
             Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
             if Plugin.service.enabled:
                 Plugin.start_controller_listener()

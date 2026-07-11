@@ -81,29 +81,41 @@
     return GenIcon({"tag":"svg","attr":{"viewBox":"0 0 352 512"},"child":[{"tag":"path","attr":{"d":"M176 352c53.02 0 96-42.98 96-96V96c0-53.02-42.98-96-96-96S80 42.98 80 96v160c0 53.02 42.98 96 96 96zm160-160h-16c-8.84 0-16 7.16-16 16v48c0 74.8-64.49 134.82-140.79 127.38C96.71 376.89 48 317.11 48 250.3V208c0-8.84-7.16-16-16-16H16c-8.84 0-16 7.16-16 16v40.16c0 89.64 63.97 169.55 152 181.69V464H96c-8.84 0-16 7.16-16 16v16c0 8.84 7.16 16 16 16h160c8.84 0 16-7.16 16-16v-16c0-8.84-7.16-16-16-16h-56v-33.77C285.71 418.47 352 344.9 352 256v-48c0-8.84-7.16-16-16-16z"}}]})(props);
   }
 
-  const BUTTON_OPTIONS = ["L1", "R1", "L2", "R2", "L3", "R3", "A", "B", "X", "Y", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"];
-  const DROPDOWN_OPTIONS = BUTTON_OPTIONS.map((button) => ({ data: button, label: button }));
+  const STEAM_DECK_BUTTONS = [
+      "A", "B", "X", "Y",
+      "L1", "R1", "L2", "R2", "L3", "R3",
+      "L4", "R4", "L5", "R5",
+      "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
+      "SELECT", "START", "STEAM", "QAM",
+      "LEFT_PAD_CLICK", "RIGHT_PAD_CLICK",
+  ];
+  const STEAM_DECK_BUTTON_LABELS = {
+      DPAD_UP: "D-Pad Up",
+      DPAD_DOWN: "D-Pad Down",
+      DPAD_LEFT: "D-Pad Left",
+      DPAD_RIGHT: "D-Pad Right",
+      LEFT_PAD_CLICK: "Left Pad Click",
+      RIGHT_PAD_CLICK: "Right Pad Click",
+  };
+  const STEAM_DECK_BUTTON_OPTIONS = STEAM_DECK_BUTTONS.map((button) => ({ data: button, label: STEAM_DECK_BUTTON_LABELS[button] || button }));
   const ENTER_MODE_OPTIONS = [
       { data: "pre_post", label: "Enter before and after" },
       { data: "post_only", label: "Enter only at end" },
+      { data: "t_post", label: "T to open, Enter at end" },
       { data: "none", label: "No automatic Enter" },
   ];
-  const normalizeButtons = (next) => {
-      const normalized = next.filter((button) => BUTTON_OPTIONS.includes(button));
-      const first = normalized[0] || "L1";
-      let second = normalized[1] || "R1";
-      if (second === first) {
-          second = BUTTON_OPTIONS.find((button) => button !== first) || "R1";
-      }
-      return [first, second];
-  };
+  const normalizeSteamDeckButton = (next) => STEAM_DECK_BUTTONS.includes(next) ? next : "L5";
   const getActiveGame = async () => {
       try {
           const router = deckyFrontendLib.Router;
           const running = Array.isArray(router?.RunningApps) ? router.RunningApps : [];
-          const app = router?.MainRunningApp || running[0] || router?.AppStore?.m_selectedApp || router?.AppStore?.m_currentApp;
+          const app = router?.MainRunningApp ||
+              running[0] ||
+              router?.AppStore?.m_selectedApp ||
+              router?.AppStore?.m_currentApp;
           let appId = app?.appid ? String(app.appid) : "";
           let appName = app?.display_name ? String(app.display_name) : "";
+          // Fallback to SteamClient APIs when Router fields are unavailable.
           if (!appId) {
               const apps = window?.SteamClient?.Apps;
               try {
@@ -127,6 +139,7 @@
                   // no-op
               }
           }
+          // Final fallback: parse app id from URL path/hash.
           if (!appId) {
               const raw = `${window.location?.pathname || ""} ${window.location?.hash || ""} ${window.location?.href || ""}`;
               const m = raw.match(/(?:app|game)\/(\d{2,})/i);
@@ -142,10 +155,12 @@
   function Content({ serverAPI }) {
       const [recording, setRecording] = React.useState(false);
       const [enabled, setEnabled] = React.useState(false);
-      const [buttons, setButtons] = React.useState(["L1", "R1"]);
+      const [steamDeckButton, setSteamDeckButton] = React.useState("L5");
       const [lastError, setLastError] = React.useState("");
       const [lastText, setLastText] = React.useState("");
       const [enterMode, setEnterMode] = React.useState("pre_post");
+      const [translateToEnglish, setTranslateToEnglish] = React.useState(false);
+      const [remotePlayTyping, setRemotePlayTyping] = React.useState(false);
       const [activeAppId, setActiveAppId] = React.useState("");
       const [activeAppName, setActiveAppName] = React.useState("");
       const [hasGameProfile, setHasGameProfile] = React.useState(false);
@@ -161,8 +176,8 @@
           lastKnownAppRef.current = signature;
           await serverAPI.callPluginMethod("set_active_game", { app_id: appId, app_name: appName });
       };
-      const updateButtons = async (next) => {
-          await serverAPI.callPluginMethod("set_button_config", { buttons: normalizeButtons(next) });
+      const updateSteamDeckButton = async (next) => {
+          await serverAPI.callPluginMethod("set_steam_deck_button", { button: normalizeSteamDeckButton(next) });
           await refresh();
       };
       const flog = async (level, message) => {
@@ -180,9 +195,10 @@
               if (st?.success) {
                   setRecording(!!st.result.recording);
                   setEnabled(!!st.result.enabled);
-                  if (Array.isArray(st.result.buttons))
-                      setButtons(normalizeButtons(st.result.buttons));
+                  setSteamDeckButton(normalizeSteamDeckButton(String(st.result.steam_deck_button || "L5")));
                   setEnterMode(String(st.result.enter_mode || "pre_post"));
+                  setTranslateToEnglish(!!st.result.translate_to_english);
+                  setRemotePlayTyping(!!st.result.remote_play_typing);
                   setActiveAppId(String(st.result.active_app_id || ""));
                   setActiveAppName(String(st.result.active_app_name || ""));
                   setHasGameProfile(!!st.result.has_game_profile);
@@ -257,12 +273,12 @@
                   lastError))) : null,
           lastText ? (React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
               React__default["default"].createElement("div", { className: deckyFrontendLib.staticClasses.Text },
-                  "\u00DAltimo texto: ",
+                  "Last text: ",
                   lastText))) : null,
           React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
               React__default["default"].createElement("div", { className: deckyFrontendLib.staticClasses.Text },
                   "PTT: hold ",
-                  buttons.join("+"),
+                  steamDeckButton,
                   " to record")),
           React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
               React__default["default"].createElement("div", { className: deckyFrontendLib.staticClasses.Text },
@@ -285,12 +301,18 @@
                       await refresh();
                   } })),
           React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
-              React__default["default"].createElement(deckyFrontendLib.DropdownItem, { label: "Button 1", layout: "below", rgOptions: DROPDOWN_OPTIONS, selectedOption: buttons[0] || "L1", onChange: async (option) => {
-                      await updateButtons([String(option.data), buttons[1] || "R1"]);
+              React__default["default"].createElement(deckyFrontendLib.ToggleField, { label: "Translate to English", checked: translateToEnglish, onChange: async (enabled) => {
+                      await serverAPI.callPluginMethod("set_translate_to_english", { enabled });
+                      await refresh();
                   } })),
           React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
-              React__default["default"].createElement(deckyFrontendLib.DropdownItem, { label: "Button 2", layout: "below", rgOptions: DROPDOWN_OPTIONS, selectedOption: buttons[1] || "R1", onChange: async (option) => {
-                      await updateButtons([buttons[0] || "L1", String(option.data)]);
+              React__default["default"].createElement(deckyFrontendLib.ToggleField, { label: "Remote Play typing", description: "Types text as keyboard events without using the clipboard.", checked: remotePlayTyping, onChange: async (enabled) => {
+                      await serverAPI.callPluginMethod("set_remote_play_typing", { enabled });
+                      await refresh();
+                  } })),
+          React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+              React__default["default"].createElement(deckyFrontendLib.DropdownItem, { label: "Steam Deck button", layout: "below", rgOptions: STEAM_DECK_BUTTON_OPTIONS, selectedOption: steamDeckButton, onChange: async (option) => {
+                      await updateSteamDeckButton(String(option.data));
                   } })),
           React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
               React__default["default"].createElement(deckyFrontendLib.ButtonItem, { layout: "below", onClick: async () => {

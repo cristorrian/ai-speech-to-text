@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 import json
 import os
-import sys
-
-PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-PY_MODULES_DIR = os.path.join(PLUGIN_DIR, "py_modules")
-if os.path.isdir(PY_MODULES_DIR):
-    sys.path.insert(0, PY_MODULES_DIR)
-
-import evdev
-from evdev import ecodes
+import select
+import struct
+import time
 
 RUNTIME_DIR = "/tmp/ai-speech-to-text"
 os.makedirs(RUNTIME_DIR, exist_ok=True)
@@ -18,54 +12,57 @@ PID_FILE = os.path.join(RUNTIME_DIR, "ai_speech_to_text_listener.pid")
 SETTINGS_DIR = os.environ.get("DECKY_PLUGIN_SETTINGS_DIR", "").strip() or os.path.expanduser("~/homebrew/settings/ai-speech-to-text")
 CONFIG_FILE = os.path.join(SETTINGS_DIR, "decky_button_config.json")
 
-BUTTON_CODES = {
-    "L1": [310],
-    "R1": [311],
-    # SteamOS/Steam Input can expose stick clicks as BTN_THUMB* on the virtual
-    # XInput pad, or as SELECT/START on some profiles.
-    "L3": [317, 314],
-    "R3": [318, 315],
-    "A": [304],
-    "B": [305],
-    "X": [307],
-    "Y": [308],
-    "DPAD_UP": [544],
-    "DPAD_DOWN": [545],
-    "DPAD_LEFT": [546],
-    "DPAD_RIGHT": [547],
+STEAM_DECK_BUTTON_OPTIONS = [
+    "A", "B", "X", "Y",
+    "L1", "R1", "L2", "R2", "L3", "R3",
+    "L4", "R4", "L5", "R5",
+    "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT",
+    "SELECT", "START", "STEAM", "QAM",
+    "LEFT_PAD_CLICK", "RIGHT_PAD_CLICK",
+]
+VALVE_VID = "28DE"
+STEAM_DECK_PID = "1205"
+HID_PACKET_SIZE = 64
+HIDIOCSFEATURE = lambda size: 0xC0000000 | (size << 16) | (ord("H") << 8) | 0x06
+ID_CLEAR_DIGITAL_MAPPINGS = 0x81
+ID_SET_SETTINGS_VALUES = 0x87
+SETTING_LEFT_TRACKPAD_MODE = 0x07
+SETTING_RIGHT_TRACKPAD_MODE = 0x08
+SETTING_STEAM_WATCHDOG_ENABLE = 0x2D
+TRACKPAD_NONE = 0x07
+BUTTONS_L = {
+    "R2": 0x00000001,
+    "L2": 0x00000002,
+    "R1": 0x00000004,
+    "L1": 0x00000008,
+    "Y": 0x00000010,
+    "B": 0x00000020,
+    "X": 0x00000040,
+    "A": 0x00000080,
+    "DPAD_UP": 0x00000100,
+    "DPAD_RIGHT": 0x00000200,
+    "DPAD_LEFT": 0x00000400,
+    "DPAD_DOWN": 0x00000800,
+    "SELECT": 0x00001000,
+    "STEAM": 0x00002000,
+    "START": 0x00004000,
+    "L5": 0x00008000,
+    "R5": 0x00010000,
+    "LEFT_PAD_CLICK": 0x00080000,
+    "RIGHT_PAD_CLICK": 0x00100000,
+    "L3": 0x00400000,
+    "R3": 0x04000000,
+}
+BUTTONS_H = {
+    "L4": 0x00000200,
+    "R4": 0x00000400,
+    "QAM": 0x00040000,
 }
 
-TRIGGER_AXES = {"L2": 2, "R2": 5}
-TRIGGER_BUTTONS = {"L2": 312, "R2": 313}
-TRIGGER_THRESHOLD = 128
-BUTTON_OPTIONS = ["L1", "R1", "L2", "R2", "L3", "R3", "A", "B", "X", "Y", "DPAD_UP", "DPAD_DOWN", "DPAD_LEFT", "DPAD_RIGHT"]
 
-
-def normalize_buttons(buttons):
-    if not isinstance(buttons, list):
-        buttons = []
-    normalized = [button for button in buttons if button in BUTTON_OPTIONS]
-    first = normalized[0] if len(normalized) > 0 else "L1"
-    second = normalized[1] if len(normalized) > 1 else "R1"
-    if second == first:
-        second = next((button for button in BUTTON_OPTIONS if button != first), "R1")
-    return [first, second]
-
-
-def _has_gamepad_keys(caps):
-    if ecodes.EV_KEY not in caps:
-        return False
-    keys = caps[ecodes.EV_KEY]
-    needed = [304, 305, 307, 308, 310, 311, 312, 313, 314, 315, 316, 317, 318]
-    return any(code in keys for code in needed)
-
-
-def _has_trigger_axes(caps):
-    if ecodes.EV_ABS not in caps:
-        return False
-    axes = caps[ecodes.EV_ABS]
-    axis_codes = [a[0] if isinstance(a, tuple) else a for a in axes]
-    return (2 in axis_codes) or (5 in axis_codes)
+def normalize_steam_deck_button(button):
+    button = str(button or "L5").strip().upper()
+    return button if button in STEAM_DECK_BUTTON_OPTIONS else "L5"
 
 
 def load_button_config():
@@ -79,101 +76,124 @@ def load_button_config():
                     profile = profiles.get(app_id) if app_id else None
                     if not isinstance(profile, dict):
                         profile = cfg.get("global", {})
-                    buttons = profile.get("buttons", ["L1", "R1"])
-                else:
-                    buttons = cfg.get("buttons", ["L1", "R1"])
-                return normalize_buttons(buttons)
+                    return normalize_steam_deck_button(profile.get("steam_deck_button"))
+                return normalize_steam_deck_button(cfg.get("steam_deck_button"))
         except Exception:
             pass
-    return ["L1", "R1"]
+    return "L5"
 
 
-def find_gamepad():
+def find_hidraw_device():
     candidates = []
-    preferred_path = os.environ.get("VOICEINPUT_DEVICE_PATH", "").strip()
-    if preferred_path:
+    for idx in range(0, 16):
+        path = f"/dev/hidraw{idx}"
+        if not os.path.exists(path):
+            continue
+        uevent_path = f"/sys/class/hidraw/hidraw{idx}/device/uevent"
         try:
-            d = evdev.InputDevice(preferred_path)
-            print(f"Using forced device path: {preferred_path} ({d.name})", flush=True)
-            return d
+            with open(uevent_path, "r") as f:
+                content = f.read().upper()
+            if VALVE_VID in content and STEAM_DECK_PID in content:
+                candidates.append((idx, path))
+                print(f"Found Valve hidraw candidate: {path}", flush=True)
         except Exception as e:
-            print(f"Forced device path failed: {preferred_path} ({e})", flush=True)
-
-    for path in evdev.list_devices():
+            print(f"Cannot inspect {uevent_path}: {e}", flush=True)
+    for idx, path in candidates:
         try:
-            d = evdev.InputDevice(path)
-            name = d.name.lower()
-            caps = d.capabilities()
-            has_buttons = _has_gamepad_keys(caps)
-            has_triggers = _has_trigger_axes(caps)
-            print(
-                f"Device scan: path={path} name='{d.name}' has_buttons={has_buttons} has_triggers={has_triggers}",
-                flush=True,
-            )
-            if has_buttons or has_triggers:
-                score = 0
-                if any(k in name for k in ["steam deck", "valve", "xbox", "x-box", "gamepad", "controller"]):
-                    score += 10
-                if has_buttons:
-                    score += 4
-                if has_triggers:
-                    score += 2
-                # Prefer event nodes often associated with active controller instances in game mode
-                if path.endswith("event10") or path.endswith("event12") or path.endswith("event18"):
-                    score += 1
-                candidates.append((score, path, d.name, d))
-                if score >= 12:
-                    print(f"Selected preferred gamepad: {path} {d.name}", flush=True)
-                    return d
+            link_target = os.readlink(f"/sys/class/hidraw/hidraw{idx}")
+            if ":1.2/" in link_target:
+                print(f"Selected Steam Deck hidraw gamepad interface: {path}", flush=True)
+                return path
         except Exception:
             pass
     if candidates:
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        score, path, dev_name, dev = candidates[0]
-        print(f"Candidates ranked: {[{'score': c[0], 'path': c[1], 'name': c[2]} for c in candidates[:6]]}", flush=True)
-        print(f"Selected fallback gamepad: {path} {dev_name}", flush=True)
-        return dev
-    print("No compatible EV_KEY gamepad candidates found. Device scan:", flush=True)
-    for path in evdev.list_devices():
-        try:
-            d = evdev.InputDevice(path)
-            print(f"  - {path}: {d.name}", flush=True)
-        except Exception:
-            pass
-
-    # Fallback final: intentar abrir /dev/input/event* por orden
-    for idx in range(0, 32):
-        ev_path = f"/dev/input/event{idx}"
-        if not os.path.exists(ev_path):
-            continue
-        try:
-            d = evdev.InputDevice(ev_path)
-            caps = d.capabilities()
-            if _has_gamepad_keys(caps) or _has_trigger_axes(caps):
-                    print(f"Selected event fallback: {ev_path} {d.name}", flush=True)
-                    return d
-        except Exception as e:
-            print(f"Event fallback failed for {ev_path}: {e}", flush=True)
+        path = candidates[-1][1]
+        print(f"Selected fallback Steam Deck hidraw interface: {path}", flush=True)
+        return path
     return None
 
 
-def build_button_info(buttons):
-    info = []
-    for name in buttons:
-        is_trigger = name in TRIGGER_AXES
-        codes = [TRIGGER_AXES.get(name)] if is_trigger else BUTTON_CODES.get(name)
-        if not codes or codes[0] is None:
-            print(f"Invalid button: {name}", flush=True)
-            sys.exit(1)
-        info.append({
-            "name": name,
-            "is_trigger": is_trigger,
-            "codes": codes,
-            "code": codes[0],
-            "digital_code": TRIGGER_BUTTONS.get(name),
-            "pressed": False,
-        })
-    return info
+def send_feature_report(fd, data):
+    try:
+        import fcntl
+        buf = bytes(data) + bytes(64 - len(data))
+        fcntl.ioctl(fd, HIDIOCSFEATURE(64), buf)
+        return True
+    except Exception as e:
+        print(f"Feature report failed: {e}", flush=True)
+        return False
+
+
+def open_hidraw_device():
+    path = find_hidraw_device()
+    if not path:
+        return None, None
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_NONBLOCK)
+        send_feature_report(fd, [ID_CLEAR_DIGITAL_MAPPINGS])
+        send_feature_report(
+            fd,
+            [
+                ID_SET_SETTINGS_VALUES,
+                3,
+                SETTING_LEFT_TRACKPAD_MODE, TRACKPAD_NONE,
+                SETTING_RIGHT_TRACKPAD_MODE, TRACKPAD_NONE,
+                SETTING_STEAM_WATCHDOG_ENABLE, 0,
+            ],
+        )
+        print(f"Opened Steam Deck hidraw device: {path}", flush=True)
+        return fd, path
+    except Exception as e:
+        print(f"Could not open Steam Deck hidraw device {path}: {e}", flush=True)
+        return None, None
+
+
+def steam_deck_button_pressed(data, button):
+    if len(data) < 16:
+        return False
+    buttons_l = struct.unpack("<I", data[8:12])[0]
+    buttons_h = struct.unpack("<I", data[12:16])[0]
+    return bool((buttons_l & BUTTONS_L.get(button, 0)) or (buttons_h & BUTTONS_H.get(button, 0)))
+
+
+def run_button_listener(button):
+    active = False
+    while True:
+        fd, path = open_hidraw_device()
+        if fd is None:
+            print("No Steam Deck hidraw device found, retrying...", flush=True)
+            time.sleep(1.0)
+            continue
+        try:
+            print(f"Listening on Steam Deck button {button} via {path}", flush=True)
+            while True:
+                readable, _, _ = select.select([fd], [], [], 0.5)
+                if not readable:
+                    continue
+                data = os.read(fd, HID_PACKET_SIZE)
+                pressed = steam_deck_button_pressed(data, button)
+                if pressed and not active:
+                    active = True
+                    print(f"Steam Deck button {button} active -> STATE=1", flush=True)
+                    with open(STATE_FILE, "w") as f:
+                        f.write("1")
+                elif (not pressed) and active:
+                    active = False
+                    print(f"Steam Deck button {button} released -> STATE=0", flush=True)
+                    with open(STATE_FILE, "w") as f:
+                        f.write("0")
+        except OSError as e:
+            print(f"Steam Deck hidraw read failed ({e}), reconnecting...", flush=True)
+            if active:
+                active = False
+                with open(STATE_FILE, "w") as f:
+                    f.write("0")
+            time.sleep(0.5)
+        finally:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
 
 
 def main():
@@ -182,72 +202,14 @@ def main():
     with open(STATE_FILE, "w") as f:
         f.write("0")
 
-    buttons = load_button_config()
-    info = build_button_info(buttons)
-
-    print(f"Configured combo buttons={buttons}", flush=True)
-
-    active = False
+    button = load_button_config()
+    print(f"Configured Steam Deck button={button}", flush=True)
     try:
-        while True:
-            dev = find_gamepad()
-            if not dev:
-                print("No gamepad found, retrying...", flush=True)
-                import time
-                time.sleep(1.0)
-                continue
-
-            print(f"Listening on device: {dev.path} {dev.name}", flush=True)
-            try:
-                for event in dev.read_loop():
-                    changed = False
-                    if event.type == ecodes.EV_KEY:
-                        for b in info:
-                            if (not b["is_trigger"]) and event.code in b["codes"]:
-                                b["pressed"] = event.value == 1
-                                changed = True
-                                print(f"EV_KEY {b['name']} code={event.code} value={event.value} pressed={b['pressed']}", flush=True)
-                            elif b["is_trigger"] and b["digital_code"] and event.code == b["digital_code"]:
-                                b["pressed"] = event.value == 1
-                                changed = True
-                                print(f"EV_KEY(trigger-digital) {b['name']} code={event.code} value={event.value} pressed={b['pressed']}", flush=True)
-                    elif event.type == ecodes.EV_ABS:
-                        for b in info:
-                            if b["is_trigger"] and event.code == b["code"]:
-                                b["pressed"] = abs(event.value) > TRIGGER_THRESHOLD
-                                changed = True
-                                print(
-                                    f"EV_ABS {b['name']} axis={event.code} value={event.value} threshold={TRIGGER_THRESHOLD} pressed={b['pressed']}",
-                                    flush=True,
-                                )
-
-                    if changed:
-                        now = all(b["pressed"] for b in info)
-                        if now and not active:
-                            active = True
-                            print("Combo active -> STATE=1", flush=True)
-                            with open(STATE_FILE, "w") as f:
-                                f.write("1")
-                        elif (not now) and active:
-                            active = False
-                            print("Combo released -> STATE=0", flush=True)
-                            with open(STATE_FILE, "w") as f:
-                                f.write("0")
-            except OSError as e:
-                print(f"Device read failed ({e}), re-scanning...", flush=True)
-                for b in info:
-                    b["pressed"] = False
-                if active:
-                    active = False
-                    with open(STATE_FILE, "w") as f:
-                        f.write("0")
-                import time
-                time.sleep(0.5)
-                continue
+        run_button_listener(button)
     finally:
-        for p in [STATE_FILE, PID_FILE]:
+        for path in [STATE_FILE, PID_FILE]:
             try:
-                os.remove(p)
+                os.remove(path)
             except Exception:
                 pass
 

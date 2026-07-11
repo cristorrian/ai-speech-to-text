@@ -2,20 +2,22 @@
 
 AI Speech-to-Text is a Decky Loader plugin for Steam Deck that records voice, sends the audio to a configurable AI transcription endpoint, and inserts the resulting text into the active game or app.
 
-It is designed for push-to-talk use in Gaming Mode, with per-game profiles for button combos, Enter behavior, and transcription provider/model selection.
+It is designed for push-to-talk use in Gaming Mode, with per-game profiles for Steam Deck buttons, text insertion behavior, translation, Remote Play typing, and transcription provider/model selection.
 
 ## Features ✨
 
-- Push-to-talk recording from a two-button controller combo.
+- Push-to-talk recording from Steam Deck controller buttons.
 - Manual recording controls from the Decky sidebar.
 - Per-game profiles, with global defaults.
 - Configurable transcription profiles from JSON.
+- Optional audio translation to English through compatible transcription endpoints.
+- Remote Play typing mode that avoids clipboard-based paste.
 - OpenAI-compatible transcription endpoint support.
 - Built-in examples for Groq, OpenAI, and OpenRouter endpoints.
 - Optional `language` per transcription profile, with `auto` as the default.
 - Unicode-friendly text insertion through clipboard-based paste paths.
 - Bundled command-line tools under `bin/` to reduce external dependencies.
-- Vendored `evdev` Python module under `py_modules/` for controller input.
+- Low-level Steam Deck button detection through `/dev/hidraw`.
 
 ## Installation 📦
 
@@ -81,6 +83,14 @@ The template intentionally does not include API keys.
       "api_url": "https://api.openai.com/v1/audio/transcriptions"
     },
     {
+      "name": "OpenRouter Whisper Large v3 Turbo",
+      "provider": "openrouter",
+      "model": "openai/whisper-large-v3-turbo",
+      "language": "auto",
+      "api_key": "YOUR_OPENROUTER_API_KEY",
+      "api_url": "https://openrouter.ai/api/v1/audio/transcriptions"
+    },
+    {
       "name": "OpenRouter Voxtral Mini Transcribe",
       "provider": "openrouter",
       "model": "mistralai/voxtral-mini-transcribe",
@@ -97,7 +107,7 @@ The template intentionally does not include API keys.
 - `name`: Required. This is what appears in the plugin selector.
 - `provider`: Optional label used in the UI and logs. It does not control routing.
 - `model`: Required. Sent as the `model` form field.
-- `language`: Optional. Use `auto` to let the provider detect the spoken language.
+- `language`: Optional. Use `auto` to let the provider detect the spoken language. This selects or hints the spoken language; it does not translate.
 - `api_key`: Required. Used as a Bearer token.
 - `api_url`: Required. The transcription endpoint URL.
 
@@ -105,20 +115,14 @@ The backend is dynamic: it does not hard-code provider routing. It sends the req
 
 Most providers use OpenAI-compatible multipart uploads. OpenRouter is handled automatically with JSON + base64 `input_audio`.
 
+The bundled Groq profile is historically named `Grok Whisper Large v3` in existing installs. The `provider` label `grok` is accepted by the plugin and normalized internally for compatibility.
+
 ### Recommended Provider for Free Usage
 
-For free-tier usage, the recommended provider is **Groq** (`whisper-large-v3` or `whisper-large-v3-turbo`) because it offers generous STT limits on free accounts and is typically faster in real-time plugin workflows compared with other providers.
+For free-tier usage, **Groq** (`whisper-large-v3` or `whisper-large-v3-turbo`) is usually a good first option because it is fast for short push-to-talk recordings and publishes speech-to-text limits for free accounts.
 
-Current Groq free-tier STT limits for these models:
-
-- `20 RPM` (requests per minute)
-- `2,000 RPD` (requests per day)
-- `7,200 ASH` (audio seconds per hour, equal to 2 hours/hour)
-- `28,800 ASD` (audio seconds per day, equal to 8 hours/day)
-
-Official reference:
-
-- https://console.groq.com/docs/rate-limits
+Check the official rate-limit page before relying on a specific quota:
+https://console.groq.com/docs/rate-limits
 
 ## Using The Plugin 🎮
 
@@ -133,21 +137,28 @@ Enable or disable the plugin with **Enabled**.
 - Global when no per-game profile is active.
 - Per-game when a game profile is active.
 
-When enabled, the controller listener starts and watches for the selected push-to-talk combo.
+When enabled, the input listener starts and watches for the selected Steam Deck button.
 
 ### Push-To-Talk 🎤
 
-The plugin uses two buttons as a push-to-talk combo:
+The plugin reads the built-in controller directly through `/dev/hidraw`, so it can detect Steam Deck buttons in Gaming Mode without relying on Steam Input keyboard remaps.
 
-- Hold both buttons to start recording.
-- Release either button to stop recording.
+- Hold the selected button to start recording.
+- Release it to stop recording.
 - The plugin transcribes the recording and inserts the text.
 
-Available buttons:
+Available Steam Deck buttons:
 
 ```text
-L1, R1, L2, R2, L3, R3, A, B, X, Y, DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT
+A, B, X, Y,
+L1, R1, L2, R2, L3, R3,
+L4, R4, L5, R5,
+DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT,
+SELECT, START, STEAM, QAM,
+LEFT_PAD_CLICK, RIGHT_PAD_CLICK
 ```
+
+`STEAM` and `QAM` can still open SteamOS overlays while being detected, so rear buttons or ordinary gamepad buttons are usually better PTT choices.
 
 ### Provider / Model 🤖
 
@@ -155,12 +166,31 @@ The **Provider / model** dropdown lists the profiles from `/home/deck/homebrew/s
 
 Selecting a profile changes the transcription endpoint/model used by the current global or per-game profile.
 
+### Translation 🌐
+
+The **Translate to English** checkbox controls audio translation and is disabled by default.
+
+- Disabled: uses the configured transcription endpoint and preserves the spoken language.
+- Enabled: changes a compatible `/audio/transcriptions` endpoint to `/audio/translations` and returns English text.
+- If the selected endpoint cannot provide audio translation, the plugin reports an error instead of silently inserting untranslated text.
+
+Changing `language` in a profile does not enable translation; it only tells the provider which language is being spoken. Audio translation endpoints currently translate speech to English. OpenRouter's dedicated transcription endpoint does not currently expose this translation mode.
+
+### Remote Play Typing 🖥️
+
+Enable **Remote Play typing** for games streamed from another PC.
+
+Steam Remote Play forwards keyboard events but does not reliably synchronize the Steam Deck clipboard with the host PC. This mode disables clipboard paste and types the result as keyboard events instead.
+
+For Windows hosts using the **Español (España)** keyboard layout, the plugin uses layout-aware key sequences for `ñ`, accented vowels, `ü`, `¿`, and `¡`. Other Unicode characters may still fall back to approximate ASCII.
+
 ### Enter Mode ⌨️
 
 The **Enter mode** dropdown controls whether the plugin presses Enter around inserted text:
 
 - `Enter before and after`: presses Enter before inserting text, then presses Enter again after paste.
 - `Enter only at end`: inserts text, then presses Enter.
+- `T to open, Enter at end`: presses T before inserting text, then presses Enter after paste.
 - `No automatic Enter`: inserts text only.
 
 This is useful because different games handle chat boxes differently.
@@ -172,8 +202,9 @@ The plugin automatically detects the active Steam app when possible.
 Use **Profile for this game** to create a profile for the current game. Once enabled, these settings are saved separately for that game:
 
 - Enabled
-- Button 1
-- Button 2
+- Steam Deck button
+- Translate to English
+- Remote Play typing
 - Provider / model
 - Enter mode
 
@@ -213,7 +244,7 @@ qdbus-qt5
 
 The backend prefers these bundled tools and falls back to system tools when needed.
 
-The controller listener uses vendored Python `evdev` from `py_modules/`.
+The controller listener reads Steam Deck button state through `/dev/hidraw`.
 
 ## Logs 📜
 
@@ -332,16 +363,16 @@ npm run build
 Install or refresh the local Decky plugin copy:
 
 ```bash
-sudo cp -r /path/to/ai-speech-to-text /home/deck/homebrew/plugins/ai-speech-to-text
-sudo systemctl restart plugin_loader.service
-systemctl --user restart app-steam@autostart.service
+./install.sh
 ```
+
+The local installer excludes development artifacts such as `node_modules/`, preserves existing transcription API keys in the settings directory when possible, and restarts Decky plus Steam.
 
 Project layout:
 
 ```text
 main.py                         Backend, recording, transcription, insertion
-controller_listener.py          Controller push-to-talk listener
+controller_listener.py          Steam Deck button push-to-talk listener
 src/index.tsx                   Decky frontend source
 dist/index.js                   Built frontend loaded by Decky
 config/transcription_profiles.json
