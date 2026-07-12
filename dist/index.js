@@ -99,10 +99,10 @@
   };
   const STEAM_DECK_BUTTON_OPTIONS = STEAM_DECK_BUTTONS.map((button) => ({ data: button, label: STEAM_DECK_BUTTON_LABELS[button] || button }));
   const ENTER_MODE_OPTIONS = [
-      { data: "pre_post", label: "Enter before and after" },
-      { data: "post_only", label: "Enter only at end" },
-      { data: "t_post", label: "T to open, Enter at end" },
-      { data: "none", label: "No automatic Enter" },
+      { data: "before", label: "Key before text" },
+      { data: "after", label: "Key after text" },
+      { data: "before_after", label: "Key before and after" },
+      { data: "none", label: "No key" },
   ];
   const normalizeSteamDeckButton = (next) => STEAM_DECK_BUTTONS.includes(next) ? next : "L5";
   const getActiveGame = async () => {
@@ -158,16 +158,21 @@
       const [steamDeckButton, setSteamDeckButton] = React.useState("L5");
       const [lastError, setLastError] = React.useState("");
       const [lastText, setLastText] = React.useState("");
-      const [enterMode, setEnterMode] = React.useState("pre_post");
+      const [enterMode, setEnterMode] = React.useState("before_after");
+      const [preKey, setPreKey] = React.useState("enter");
+      const [postKey, setPostKey] = React.useState("enter");
       const [translateToEnglish, setTranslateToEnglish] = React.useState(false);
       const [remotePlayTyping, setRemotePlayTyping] = React.useState(false);
       const [activeAppId, setActiveAppId] = React.useState("");
       const [activeAppName, setActiveAppName] = React.useState("");
       const [hasGameProfile, setHasGameProfile] = React.useState(false);
       const [statusText, setStatusText] = React.useState("Ready");
+      const [showKeyGuide, setShowKeyGuide] = React.useState(false);
       const [activeTranscriptionProfile, setActiveTranscriptionProfile] = React.useState("Grok Whisper Large v3");
       const [transcriptionProfileOptions, setTranscriptionProfileOptions] = React.useState([]);
       const lastKnownAppRef = React.useRef("");
+      const editingKeyRef = React.useRef("");
+      const dirtyKeysRef = React.useRef({ pre: false, post: false });
       const syncActiveGame = async () => {
           const { appId, appName } = await getActiveGame();
           const signature = `${appId}:${appName}`;
@@ -196,7 +201,11 @@
                   setRecording(!!st.result.recording);
                   setEnabled(!!st.result.enabled);
                   setSteamDeckButton(normalizeSteamDeckButton(String(st.result.steam_deck_button || "L5")));
-                  setEnterMode(String(st.result.enter_mode || "pre_post"));
+                  setEnterMode(String(st.result.enter_mode || "before_after"));
+                  if (editingKeyRef.current !== "pre" && !dirtyKeysRef.current.pre)
+                      setPreKey(String(st.result.pre_key || "enter"));
+                  if (editingKeyRef.current !== "post" && !dirtyKeysRef.current.post)
+                      setPostKey(String(st.result.post_key || "enter"));
                   setTranslateToEnglish(!!st.result.translate_to_english);
                   setRemotePlayTyping(!!st.result.remote_play_typing);
                   setActiveAppId(String(st.result.active_app_id || ""));
@@ -257,6 +266,36 @@
           await refresh();
       };
       const editingLabel = activeAppId && hasGameProfile ? `profile for ${activeAppName || activeAppId}` : "global settings";
+      const showPreKey = enterMode === "before" || enterMode === "before_after";
+      const showPostKey = enterMode === "after" || enterMode === "before_after";
+      const saveTextEntryKey = async (position, keyName) => {
+          if (!keyName.trim()) {
+              return;
+          }
+          const result = await serverAPI.callPluginMethod("set_text_entry_key", { position, key_name: keyName });
+          dirtyKeysRef.current[position] = false;
+          editingKeyRef.current = "";
+          const savedKey = String(result?.result?.[position === "pre" ? "pre_key" : "post_key"] || keyName);
+          if (position === "pre")
+              setPreKey(savedKey);
+          if (position === "post")
+              setPostKey(savedKey);
+      };
+      if (showKeyGuide) {
+          return (React__default["default"].createElement(deckyFrontendLib.PanelSection, { title: "Key guide" },
+              React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+                  React__default["default"].createElement(deckyFrontendLib.ButtonItem, { layout: "below", onClick: () => setShowKeyGuide(false) }, "Back")),
+              React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+                  React__default["default"].createElement("div", { className: deckyFrontendLib.staticClasses.Text }, "Type key names directly in the text fields.")),
+              React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+                  React__default["default"].createElement("div", { className: deckyFrontendLib.staticClasses.Text }, "Special keys: Enter, Esc, Space, Tab.")),
+              React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+                  React__default["default"].createElement("div", { className: deckyFrontendLib.staticClasses.Text }, "Function keys: F1, F2, F3 ... F12.")),
+              React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+                  React__default["default"].createElement("div", { className: deckyFrontendLib.staticClasses.Text }, "Letters and numbers: A-Z and 0-9.")),
+              React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+                  React__default["default"].createElement("div", { className: deckyFrontendLib.staticClasses.Text }, "Symbols: /, \\, -, ., comma (,), semicolon (;), apostrophe ('), grave (`)."))));
+      }
       return (React__default["default"].createElement(deckyFrontendLib.PanelSection, { title: "AI Speech-to-Text" },
           React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
               React__default["default"].createElement(deckyFrontendLib.ToggleField, { label: "Enabled", checked: enabled, onChange: async (v) => {
@@ -300,6 +339,32 @@
                       await serverAPI.callPluginMethod("set_enter_mode", { enter_mode: String(option.data) });
                       await refresh();
                   } })),
+          showPreKey ? (React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+              React__default["default"].createElement(deckyFrontendLib.TextField, { label: "Key before text", description: "Focus this field to open the Steam virtual keyboard. It saves when focus leaves the field.", value: preKey, onFocus: () => {
+                      editingKeyRef.current = "pre";
+                  }, onChange: (event) => {
+                      dirtyKeysRef.current.pre = true;
+                      setPreKey(event.currentTarget.value);
+                  }, onBlur: async () => {
+                      if (dirtyKeysRef.current.pre) {
+                          await saveTextEntryKey("pre", preKey);
+                      }
+                      editingKeyRef.current = "";
+                  } }))) : null,
+          showPostKey ? (React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+              React__default["default"].createElement(deckyFrontendLib.TextField, { label: "Key after text", description: "Focus this field to open the Steam virtual keyboard. It saves when focus leaves the field.", value: postKey, onFocus: () => {
+                      editingKeyRef.current = "post";
+                  }, onChange: (event) => {
+                      dirtyKeysRef.current.post = true;
+                      setPostKey(event.currentTarget.value);
+                  }, onBlur: async () => {
+                      if (dirtyKeysRef.current.post) {
+                          await saveTextEntryKey("post", postKey);
+                      }
+                      editingKeyRef.current = "";
+                  } }))) : null,
+          React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
+              React__default["default"].createElement(deckyFrontendLib.ButtonItem, { layout: "below", onClick: () => setShowKeyGuide(true) }, "Key guide")),
           React__default["default"].createElement(deckyFrontendLib.PanelSectionRow, null,
               React__default["default"].createElement(deckyFrontendLib.ToggleField, { label: "Translate to English", checked: translateToEnglish, onChange: async (enabled) => {
                       await serverAPI.callPluginMethod("set_translate_to_english", { enabled });

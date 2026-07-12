@@ -186,14 +186,18 @@ For Windows hosts using the **Español (España)** keyboard layout, the plugin u
 
 ### Enter Mode ⌨️
 
-The **Enter mode** dropdown controls whether the plugin presses Enter around inserted text:
+The **Enter mode** dropdown controls whether the plugin presses configurable keyboard keys around inserted text:
 
-- `Enter before and after`: presses Enter before inserting text, then presses Enter again after paste.
-- `Enter only at end`: inserts text, then presses Enter.
-- `T to open, Enter at end`: presses T before inserting text, then presses Enter after paste.
-- `No automatic Enter`: inserts text only.
+- `Key before text`: presses one configured key before inserting text.
+- `Key after text`: inserts text, then presses one configured key.
+- `Key before and after`: presses one configured key before inserting text, then one configured key after it.
+- `No key`: inserts text only.
 
-This is useful because different games handle chat boxes differently.
+When a mode uses a key, the plugin shows a text field for that key. Focus the field in Gaming Mode to bring up the Steam virtual keyboard, then type a key name such as `T`, `Enter`, `/`, or `F1`.
+
+Use **Key guide** in the plugin to open a separate guide panel with the supported key names. Press **Back** in that panel to return to the plugin settings. Special keys are written as `Enter`, `Esc`, `Space`, and `Tab`. Function keys are written as `F1` through `F12`. Letters and numbers can be typed directly. Supported symbols include `/`, `\`, `-`, `.`, `,`, `;`, `'`, and `` ` ``.
+
+This is useful because different games handle chat boxes differently. For example, one game may use `T` before text and `Enter` after text, while another may only need `Enter` after text.
 
 ## Per-Game Profiles 🕹️
 
@@ -207,6 +211,8 @@ Use **Profile for this game** to create a profile for the current game. Once ena
 - Remote Play typing
 - Provider / model
 - Enter mode
+- Key before text
+- Key after text
 
 When no per-game profile is active, the plugin edits the global settings.
 

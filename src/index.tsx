@@ -8,6 +8,7 @@ import {
   ToggleField,
   DropdownItem,
   SingleDropdownOption,
+  TextField,
   Router
 } from "decky-frontend-lib";
 import React from "react";
@@ -32,10 +33,10 @@ const STEAM_DECK_BUTTON_LABELS: Record<string, string> = {
 };
 const STEAM_DECK_BUTTON_OPTIONS = STEAM_DECK_BUTTONS.map((button) => ({ data: button, label: STEAM_DECK_BUTTON_LABELS[button] || button }));
 const ENTER_MODE_OPTIONS = [
-  { data: "pre_post", label: "Enter before and after" },
-  { data: "post_only", label: "Enter only at end" },
-  { data: "t_post", label: "T to open, Enter at end" },
-  { data: "none", label: "No automatic Enter" },
+  { data: "before", label: "Key before text" },
+  { data: "after", label: "Key after text" },
+  { data: "before_after", label: "Key before and after" },
+  { data: "none", label: "No key" },
 ];
 
 const normalizeSteamDeckButton = (next: string) => STEAM_DECK_BUTTONS.includes(next) ? next : "L5";
@@ -90,16 +91,21 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
   const [steamDeckButton, setSteamDeckButton] = useState("L5");
   const [lastError, setLastError] = useState("");
   const [lastText, setLastText] = useState("");
-  const [enterMode, setEnterMode] = useState("pre_post");
+  const [enterMode, setEnterMode] = useState("before_after");
+  const [preKey, setPreKey] = useState("enter");
+  const [postKey, setPostKey] = useState("enter");
   const [translateToEnglish, setTranslateToEnglish] = useState(false);
   const [remotePlayTyping, setRemotePlayTyping] = useState(false);
   const [activeAppId, setActiveAppId] = useState("");
   const [activeAppName, setActiveAppName] = useState("");
   const [hasGameProfile, setHasGameProfile] = useState(false);
   const [statusText, setStatusText] = useState("Ready");
+  const [showKeyGuide, setShowKeyGuide] = useState(false);
   const [activeTranscriptionProfile, setActiveTranscriptionProfile] = useState("Grok Whisper Large v3");
   const [transcriptionProfileOptions, setTranscriptionProfileOptions] = useState<Array<{ data: string; label: string }>>([]);
   const lastKnownAppRef = useRef("");
+  const editingKeyRef = useRef<"pre" | "post" | "">("");
+  const dirtyKeysRef = useRef<{ pre: boolean; post: boolean }>({ pre: false, post: false });
 
   const syncActiveGame = async () => {
     const { appId, appName } = await getActiveGame();
@@ -130,7 +136,9 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
         setRecording(!!st.result.recording);
         setEnabled(!!st.result.enabled);
         setSteamDeckButton(normalizeSteamDeckButton(String(st.result.steam_deck_button || "L5")));
-        setEnterMode(String(st.result.enter_mode || "pre_post"));
+        setEnterMode(String(st.result.enter_mode || "before_after"));
+        if (editingKeyRef.current !== "pre" && !dirtyKeysRef.current.pre) setPreKey(String(st.result.pre_key || "enter"));
+        if (editingKeyRef.current !== "post" && !dirtyKeysRef.current.post) setPostKey(String(st.result.post_key || "enter"));
         setTranslateToEnglish(!!st.result.translate_to_english);
         setRemotePlayTyping(!!st.result.remote_play_typing);
         setActiveAppId(String(st.result.active_app_id || ""));
@@ -190,6 +198,50 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
   };
 
   const editingLabel = activeAppId && hasGameProfile ? `profile for ${activeAppName || activeAppId}` : "global settings";
+  const showPreKey = enterMode === "before" || enterMode === "before_after";
+  const showPostKey = enterMode === "after" || enterMode === "before_after";
+
+  const saveTextEntryKey = async (position: "pre" | "post", keyName: string) => {
+    if (!keyName.trim()) {
+      return;
+    }
+    const result: any = await serverAPI.callPluginMethod("set_text_entry_key", { position, key_name: keyName });
+    dirtyKeysRef.current[position] = false;
+    editingKeyRef.current = "";
+    const savedKey = String(result?.result?.[position === "pre" ? "pre_key" : "post_key"] || keyName);
+    if (position === "pre") setPreKey(savedKey);
+    if (position === "post") setPostKey(savedKey);
+  };
+
+  if (showKeyGuide) {
+    return (
+      <PanelSection title="Key guide">
+        <PanelSectionRow>
+          <ButtonItem
+            layout="below"
+            onClick={() => setShowKeyGuide(false)}
+          >
+            Back
+          </ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div className={staticClasses.Text}>Type key names directly in the text fields.</div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div className={staticClasses.Text}>Special keys: Enter, Esc, Space, Tab.</div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div className={staticClasses.Text}>Function keys: F1, F2, F3 ... F12.</div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div className={staticClasses.Text}>Letters and numbers: A-Z and 0-9.</div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <div className={staticClasses.Text}>Symbols: /, \, -, ., comma (,), semicolon (;), apostrophe ('), grave (`).</div>
+        </PanelSectionRow>
+      </PanelSection>
+    );
+  }
 
   return (
     <PanelSection title="AI Speech-to-Text">
@@ -255,6 +307,58 @@ function Content({ serverAPI }: { serverAPI: ServerAPI }) {
             await refresh();
           }}
         />
+      </PanelSectionRow>
+      {showPreKey ? (
+        <PanelSectionRow>
+          <TextField
+            label="Key before text"
+            description="Focus this field to open the Steam virtual keyboard. It saves when focus leaves the field."
+            value={preKey}
+            onFocus={() => {
+              editingKeyRef.current = "pre";
+            }}
+            onChange={(event) => {
+              dirtyKeysRef.current.pre = true;
+              setPreKey(event.currentTarget.value);
+            }}
+            onBlur={async () => {
+              if (dirtyKeysRef.current.pre) {
+                await saveTextEntryKey("pre", preKey);
+              }
+              editingKeyRef.current = "";
+            }}
+          />
+        </PanelSectionRow>
+      ) : null}
+      {showPostKey ? (
+        <PanelSectionRow>
+          <TextField
+            label="Key after text"
+            description="Focus this field to open the Steam virtual keyboard. It saves when focus leaves the field."
+            value={postKey}
+            onFocus={() => {
+              editingKeyRef.current = "post";
+            }}
+            onChange={(event) => {
+              dirtyKeysRef.current.post = true;
+              setPostKey(event.currentTarget.value);
+            }}
+            onBlur={async () => {
+              if (dirtyKeysRef.current.post) {
+                await saveTextEntryKey("post", postKey);
+              }
+              editingKeyRef.current = "";
+            }}
+          />
+        </PanelSectionRow>
+      ) : null}
+      <PanelSectionRow>
+        <ButtonItem
+          layout="below"
+          onClick={() => setShowKeyGuide(true)}
+        >
+          Key guide
+        </ButtonItem>
       </PanelSectionRow>
       <PanelSectionRow>
         <ToggleField

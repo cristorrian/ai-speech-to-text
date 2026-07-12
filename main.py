@@ -53,7 +53,7 @@ STEAM_DECK_BUTTON_OPTIONS = (
     "SELECT", "START", "STEAM", "QAM",
     "LEFT_PAD_CLICK", "RIGHT_PAD_CLICK",
 )
-ENTER_MODE_OPTIONS = ("pre_post", "post_only", "t_post", "none")
+ENTER_MODE_OPTIONS = ("before", "after", "before_after", "none")
 
 EV_SYN = 0
 EV_KEY = 1
@@ -119,8 +119,20 @@ KEY_COMMA = 51
 KEY_DOT = 52
 KEY_SLASH = 53
 KEY_RIGHTSHIFT = 54
+KEY_F1 = 59
+KEY_F2 = 60
+KEY_F3 = 61
+KEY_F4 = 62
+KEY_F5 = 63
+KEY_F6 = 64
+KEY_F7 = 65
+KEY_F8 = 66
+KEY_F9 = 67
+KEY_F10 = 68
 KEY_LEFTALT = 56
 KEY_SPACE = 57
+KEY_F11 = 87
+KEY_F12 = 88
 KEY_RIGHTCTRL = 97
 KEY_RIGHTALT = 100
 
@@ -131,6 +143,91 @@ LETTER_KEY_CODES = {
     "s": KEY_S, "t": KEY_T, "u": KEY_U, "v": KEY_V, "w": KEY_W, "x": KEY_X,
     "y": KEY_Y, "z": KEY_Z,
 }
+DIGIT_KEY_CODES = {
+    "1": KEY_1, "2": KEY_2, "3": KEY_3, "4": KEY_4, "5": KEY_5,
+    "6": KEY_6, "7": KEY_7, "8": KEY_8, "9": KEY_9, "0": KEY_0,
+}
+TEXT_ENTRY_DEFAULT_PRE_KEY = "enter"
+TEXT_ENTRY_DEFAULT_POST_KEY = "enter"
+TEXT_ENTRY_KEY_ALIASES = {
+    "return": "enter",
+    "enter": "enter",
+    "esc": "escape",
+    "escape": "escape",
+    "space": "space",
+    "spacebar": "space",
+    "tab": "tab",
+    "slash": "/",
+    "forwardslash": "/",
+    "/": "/",
+    "backslash": "\\",
+    "\\": "\\",
+    "minus": "-",
+    "dash": "-",
+    "-": "-",
+    "period": ".",
+    "dot": ".",
+    ".": ".",
+    "comma": ",",
+    ",": ",",
+    "semicolon": ";",
+    ";": ";",
+    "apostrophe": "'",
+    "quote": "'",
+    "'": "'",
+    "grave": "`",
+    "backtick": "`",
+    "`": "`",
+}
+TEXT_ENTRY_NAMED_KEYS = {
+    "enter": {"display": "Enter", "code": KEY_ENTER, "xdotool": "Return", "wtype": "Return"},
+    "escape": {"display": "Esc", "code": KEY_ESC, "xdotool": "Escape", "wtype": "Escape"},
+    "space": {"display": "Space", "code": KEY_SPACE, "xdotool": "space", "wtype": "space"},
+    "tab": {"display": "Tab", "code": KEY_TAB, "xdotool": "Tab", "wtype": "Tab"},
+    "/": {"display": "/", "code": KEY_SLASH, "xdotool": "slash", "wtype": "slash"},
+    "\\": {"display": "\\", "code": KEY_BACKSLASH, "xdotool": "backslash", "wtype": "backslash"},
+    "-": {"display": "-", "code": KEY_MINUS, "xdotool": "minus", "wtype": "minus"},
+    ".": {"display": ".", "code": KEY_DOT, "xdotool": "period", "wtype": "period"},
+    ",": {"display": ",", "code": KEY_COMMA, "xdotool": "comma", "wtype": "comma"},
+    ";": {"display": ";", "code": KEY_SEMICOLON, "xdotool": "semicolon", "wtype": "semicolon"},
+    "'": {"display": "'", "code": KEY_APOSTROPHE, "xdotool": "apostrophe", "wtype": "apostrophe"},
+    "`": {"display": "`", "code": KEY_GRAVE, "xdotool": "grave", "wtype": "grave"},
+}
+for _idx, _code in enumerate((KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12), start=1):
+    TEXT_ENTRY_NAMED_KEYS[f"f{_idx}"] = {"display": f"F{_idx}", "code": _code, "xdotool": f"F{_idx}", "wtype": f"F{_idx}"}
+
+
+def _normalize_enter_mode(mode):
+    mode = str(mode or "before_after").strip().lower()
+    return mode if mode in ENTER_MODE_OPTIONS else "before_after"
+
+
+def _normalize_text_entry_key(value, default_key=TEXT_ENTRY_DEFAULT_POST_KEY):
+    raw = str(value or "").strip().lower()
+    if not raw:
+        raw = default_key
+    raw = TEXT_ENTRY_KEY_ALIASES.get(raw, raw)
+    if len(raw) == 1 and raw in LETTER_KEY_CODES:
+        return raw
+    if raw in DIGIT_KEY_CODES:
+        return raw
+    if raw in TEXT_ENTRY_NAMED_KEYS:
+        return raw
+    fallback = TEXT_ENTRY_KEY_ALIASES.get(str(default_key or TEXT_ENTRY_DEFAULT_POST_KEY).strip().lower(), TEXT_ENTRY_DEFAULT_POST_KEY)
+    return fallback if fallback in TEXT_ENTRY_NAMED_KEYS or fallback in LETTER_KEY_CODES or fallback in DIGIT_KEY_CODES else TEXT_ENTRY_DEFAULT_POST_KEY
+
+
+def _text_entry_key_spec(value, default_key=TEXT_ENTRY_DEFAULT_POST_KEY):
+    normalized = _normalize_text_entry_key(value, default_key)
+    if normalized in LETTER_KEY_CODES:
+        code = LETTER_KEY_CODES[normalized]
+        return {"name": normalized, "display": normalized.upper(), "code": code, "xdotool": normalized, "wtype": normalized}
+    if normalized in DIGIT_KEY_CODES:
+        code = DIGIT_KEY_CODES[normalized]
+        return {"name": normalized, "display": normalized, "code": code, "xdotool": normalized, "wtype": normalized}
+    spec = dict(TEXT_ENTRY_NAMED_KEYS[normalized])
+    spec["name"] = normalized
+    return spec
 
 
 def _install_runtime_exception_hooks():
@@ -174,7 +271,9 @@ class VoiceInputService:
         self.last_text = ""
         self.last_error = ""
         self.last_method = ""
-        self.enter_mode = "pre_post"
+        self.enter_mode = "before_after"
+        self.pre_key = TEXT_ENTRY_DEFAULT_PRE_KEY
+        self.post_key = TEXT_ENTRY_DEFAULT_POST_KEY
         self.translate_to_english = False
         self.remote_play_typing = False
         self.transcription_provider = "grok"
@@ -217,6 +316,8 @@ class VoiceInputService:
                     KEY_SEMICOLON, KEY_APOSTROPHE, KEY_GRAVE,
                     KEY_COMMA, KEY_DOT, KEY_SLASH,
                     KEY_ESC, KEY_TAB, KEY_BACKSPACE,
+                    KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6,
+                    KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12,
                     KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
                     KEY_LEFTCTRL, KEY_RIGHTCTRL,
                     KEY_LEFTALT, KEY_RIGHTALT,
@@ -741,9 +842,11 @@ class VoiceInputService:
 
     def type_text(self, text: str, enter_mode: str):
         self._verbose("type_text len=%s enter_mode=%s", len(text), enter_mode)
-        pre_enter = enter_mode == "pre_post"
-        pre_t = enter_mode == "t_post"
-        post_enter = enter_mode in ("pre_post", "post_only", "t_post")
+        entry_mode = _normalize_enter_mode(enter_mode)
+        has_pre_key = entry_mode in ("before", "before_after")
+        has_post_key = entry_mode in ("after", "before_after")
+        pre_key = _text_entry_key_spec(getattr(self, "pre_key", TEXT_ENTRY_DEFAULT_PRE_KEY), TEXT_ENTRY_DEFAULT_PRE_KEY)
+        post_key = _text_entry_key_spec(getattr(self, "post_key", TEXT_ENTRY_DEFAULT_POST_KEY), TEXT_ENTRY_DEFAULT_POST_KEY)
         post_enter_delay = 0.35
         env = self._runtime_env()
         env["YDOTOOL_SOCKET"] = "/tmp/.ydotool_socket"
@@ -767,41 +870,63 @@ class VoiceInputService:
             has_non_ascii,
         )
 
-        def _pre_text_input() -> bool:
-            # Pre-enter or pre-T can open a chat box before inserting text.
-            if not (pre_enter or pre_t):
-                return True
-            key_label = "Return" if pre_enter else "t"
-            ydotool_codes = ["28:1", "28:0"] if pre_enter else ["20:1", "20:0"]
-            virtual_key = KEY_ENTER if pre_enter else KEY_T
+        def _press_key(key_spec: dict, label: str) -> bool:
             if self.remote_play_typing and self.ensure_virtual_keyboard():
-                self._virtual_keyboard_key(virtual_key)
-                logger.info("type_text pre-%s via virtual keyboard", key_label)
+                self._virtual_keyboard_key(key_spec["code"])
+                logger.info("type_text %s-key %s via virtual keyboard", label, key_spec["name"])
                 threading.Event().wait(0.05)
                 return True
             if os.path.exists(ydotool):
+                ydotool_codes = [f"{key_spec['code']}:1", f"{key_spec['code']}:0"]
                 r = subprocess.run([ydotool, "key", *ydotool_codes], env=env, check=False)
-                logger.info("type_text pre-%s via ydotool rc=%s", key_label, r.returncode)
+                logger.info("type_text %s-key %s via ydotool rc=%s", label, key_spec["name"], r.returncode)
                 if r.returncode == 0:
                     threading.Event().wait(0.05)
                     return True
             if os.path.exists(wtype):
-                r = subprocess.run([wtype, "-k", key_label], env=env, check=False)
-                logger.info("type_text pre-%s via wtype rc=%s", key_label, r.returncode)
+                r = subprocess.run([wtype, "-k", key_spec["wtype"]], env=env, check=False)
+                logger.info("type_text %s-key %s via wtype rc=%s", label, key_spec["name"], r.returncode)
                 if r.returncode == 0:
                     threading.Event().wait(0.05)
                     return True
             if os.path.exists(xdotool):
-                r = subprocess.run([xdotool, "key", key_label], env=env, check=False)
-                logger.info("type_text pre-%s via xdotool rc=%s", key_label, r.returncode)
+                r = subprocess.run([xdotool, "key", key_spec["xdotool"]], env=env, check=False)
+                logger.info("type_text %s-key %s via xdotool rc=%s", label, key_spec["name"], r.returncode)
                 if r.returncode == 0:
                     threading.Event().wait(0.05)
                     return True
             return False
 
-        def _delay_before_post_enter(label: str):
-            logger.info("type_text delaying post-enter via %s seconds=%s", label, post_enter_delay)
+        def _pre_text_input() -> bool:
+            if not has_pre_key:
+                return True
+            return _press_key(pre_key, "pre")
+
+        def _delay_before_post_key(label: str):
+            logger.info("type_text delaying post-key via %s seconds=%s", label, post_enter_delay)
             threading.Event().wait(post_enter_delay)
+
+        def _post_text_input(label: str, prefer_backend: str = "") -> bool:
+            if not has_post_key:
+                return True
+            _delay_before_post_key(label)
+            if prefer_backend == "ydotool" and os.path.exists(ydotool):
+                r = subprocess.run([ydotool, "key", f"{post_key['code']}:1", f"{post_key['code']}:0"], env=env, check=False)
+                logger.info("type_text %s post-key via ydotool rc=%s", label, r.returncode)
+                return r.returncode == 0
+            if prefer_backend == "wtype" and os.path.exists(wtype):
+                r = subprocess.run([wtype, "-k", post_key["wtype"]], env=env, check=False)
+                logger.info("type_text %s post-key via wtype rc=%s", label, r.returncode)
+                return r.returncode == 0
+            if prefer_backend == "xdotool" and os.path.exists(xdotool):
+                r = subprocess.run([xdotool, "key", post_key["xdotool"]], env=env, check=False)
+                logger.info("type_text %s post-key via xdotool rc=%s", label, r.returncode)
+                return r.returncode == 0
+            if prefer_backend == "virtual":
+                self._virtual_keyboard_key(post_key["code"])
+                logger.info("type_text %s post-key via virtual keyboard", label)
+                return True
+            return _press_key(post_key, "post")
 
         def _try_ydotool() -> bool:
             if not os.path.exists(ydotool):
@@ -811,11 +936,8 @@ class VoiceInputService:
             logger.info("type_text backend=ydotool type rc=%s", r1.returncode)
             if r1.returncode != 0:
                 return False
-            if post_enter:
-                _delay_before_post_enter("ydotool")
-                r2 = subprocess.run([ydotool, "key", "28:1", "28:0"], env=env, check=False)
-                logger.info("type_text backend=ydotool enter rc=%s", r2.returncode)
-                if r2.returncode != 0:
+            if has_post_key:
+                if not _post_text_input("ydotool", "ydotool"):
                     return False
             self.last_method = "ydotool-type"
             return True
@@ -828,11 +950,8 @@ class VoiceInputService:
             logger.info("type_text backend=wtype type rc=%s", r1.returncode)
             if r1.returncode != 0:
                 return False
-            if post_enter:
-                _delay_before_post_enter("wtype")
-                r2 = subprocess.run([wtype, "-k", "Return"], env=env, check=False)
-                logger.info("type_text backend=wtype enter rc=%s", r2.returncode)
-                if r2.returncode != 0:
+            if has_post_key:
+                if not _post_text_input("wtype", "wtype"):
                     return False
             self.last_method = "wtype-type"
             return True
@@ -866,11 +985,8 @@ class VoiceInputService:
                 logger.info("type_text backend=xdotool type rc=%s", r1.returncode)
                 if r1.returncode != 0:
                     return False
-            if post_enter:
-                _delay_before_post_enter("xdotool")
-                r2 = subprocess.run([xdotool, "key", "Return"], env=env, check=False)
-                logger.info("type_text backend=xdotool enter rc=%s", r2.returncode)
-                if r2.returncode != 0:
+            if has_post_key:
+                if not _post_text_input("xdotool", "xdotool"):
                     return False
             self.last_method = "xdotool-type"
             return True
@@ -928,11 +1044,8 @@ class VoiceInputService:
             if not _flush(buffer):
                 return False
 
-            if post_enter:
-                _delay_before_post_enter("remote-play-es-es-xdotool")
-                r2 = subprocess.run([xdotool, "key", "Return"], env=env, check=False)
-                logger.info("type_text remote-play-es-es enter rc=%s", r2.returncode)
-                if r2.returncode != 0:
+            if has_post_key:
+                if not _post_text_input("remote-play-es-es-xdotool", "xdotool"):
                     return False
             self.last_method = "remote-play-es-es-xdotool-type"
             return True
@@ -995,9 +1108,9 @@ class VoiceInputService:
                 for ch in text:
                     if not _press_char(ch):
                         return False
-                if post_enter:
-                    _delay_before_post_enter("remote-play-uinput-keyboard")
-                    self._virtual_keyboard_key(KEY_ENTER)
+                if has_post_key:
+                    if not _post_text_input("remote-play-uinput-keyboard", "virtual"):
+                        return False
                 self.last_method = "remote-play-uinput-keyboard"
                 return True
             except Exception:
@@ -1020,10 +1133,10 @@ class VoiceInputService:
                     logger.info("type_text paste via xdotool shift+insert (%s) rc=%s", label, pv.returncode)
                     if pv.returncode != 0:
                         return False
-                if post_enter:
-                    _delay_before_post_enter(label)
-                    r2 = subprocess.run([xdotool, "key", "--clearmodifiers", "Return"], env=env, check=False)
-                    logger.info("type_text enter via xdotool (%s) rc=%s", label, r2.returncode)
+                if has_post_key:
+                    _delay_before_post_key(label)
+                    r2 = subprocess.run([xdotool, "key", "--clearmodifiers", post_key["xdotool"]], env=env, check=False)
+                    logger.info("type_text post-key via xdotool (%s) rc=%s", label, r2.returncode)
                     if r2.returncode != 0:
                         return False
                 self.last_method = label
@@ -1196,11 +1309,8 @@ class VoiceInputService:
                 logger.info("type_text clipboard paste via ydotool shift+insert rc=%s", pv_shift_ins.returncode)
                 if pv_ctrl_v.returncode != 0 and pv_shift_ins.returncode != 0:
                     return False
-                if post_enter:
-                    _delay_before_post_enter("clipboard+ydotool")
-                    r2 = subprocess.run([ydotool, "key", "28:1", "28:0"], env=env, check=False)
-                    logger.info("type_text clipboard enter via ydotool rc=%s", r2.returncode)
-                    if r2.returncode != 0:
+                if has_post_key:
+                    if not _post_text_input("clipboard+ydotool", "ydotool"):
                         return False
                 self.last_method = "clipboard+ydotool-paste"
                 return True
@@ -1216,11 +1326,8 @@ class VoiceInputService:
                         logger.info("type_text clipboard paste via wtype ctrl+shift+v rc=%s", pv3.returncode)
                         if pv3.returncode != 0:
                             return False
-                if post_enter:
-                    _delay_before_post_enter("clipboard+wtype")
-                    r2 = subprocess.run([wtype, "-k", "Return"], env=env, check=False)
-                    logger.info("type_text clipboard enter via wtype rc=%s", r2.returncode)
-                    if r2.returncode != 0:
+                if has_post_key:
+                    if not _post_text_input("clipboard+wtype", "wtype"):
                         return False
                 self.last_method = "clipboard+wtype-paste"
                 return True
@@ -1353,7 +1460,14 @@ class Plugin:
             "enabled": False,
             "active_app_id": "",
             "active_app_name": "",
-            "global": {"steam_deck_button": "L5", "enter_mode": "pre_post", "translate_to_english": False, "remote_play_typing": False},
+            "global": {
+                "steam_deck_button": "L5",
+                "enter_mode": "before_after",
+                "pre_key": TEXT_ENTRY_DEFAULT_PRE_KEY,
+                "post_key": TEXT_ENTRY_DEFAULT_POST_KEY,
+                "translate_to_english": False,
+                "remote_play_typing": False,
+            },
             "profiles": {},
         }
         f = Plugin._button_cfg_file()
@@ -1375,19 +1489,27 @@ class Plugin:
 
     @staticmethod
     def _default_profile():
-        return {"steam_deck_button": "L5", "enter_mode": "pre_post", "translate_to_english": False, "remote_play_typing": False, "transcription_profile": "Grok Whisper Large v3"}
+        return {
+            "steam_deck_button": "L5",
+            "enter_mode": "before_after",
+            "pre_key": TEXT_ENTRY_DEFAULT_PRE_KEY,
+            "post_key": TEXT_ENTRY_DEFAULT_POST_KEY,
+            "translate_to_english": False,
+            "remote_play_typing": False,
+            "transcription_profile": "Grok Whisper Large v3",
+        }
 
     @staticmethod
     def _normalize_profile(profile):
         if not isinstance(profile, dict):
             profile = {}
-        mode = profile.get("enter_mode", "pre_post")
-        if mode not in ENTER_MODE_OPTIONS:
-            mode = "pre_post"
+        mode = _normalize_enter_mode(profile.get("enter_mode", "before_after"))
         translate_to_english = bool(profile.get("translate_to_english", profile.get("translation_mode") == "english"))
         normalized = {
             "steam_deck_button": Plugin._normalize_steam_deck_button(profile.get("steam_deck_button")),
             "enter_mode": mode,
+            "pre_key": _normalize_text_entry_key(profile.get("pre_key", TEXT_ENTRY_DEFAULT_PRE_KEY), TEXT_ENTRY_DEFAULT_PRE_KEY),
+            "post_key": _normalize_text_entry_key(profile.get("post_key", TEXT_ENTRY_DEFAULT_POST_KEY), TEXT_ENTRY_DEFAULT_POST_KEY),
             "translate_to_english": translate_to_english,
             "remote_play_typing": bool(profile.get("remote_play_typing", False)),
             "transcription_profile": str(profile.get("transcription_profile", "Grok Whisper Large v3") or "Grok Whisper Large v3"),
@@ -1525,7 +1647,9 @@ class Plugin:
             Plugin.service.debug_logging = bool(runtime_cfg.get("debug_logging", False))
             profile, _has_profile, _app_key = Plugin._effective_profile(cfg)
             Plugin.service.enabled = Plugin._effective_enabled(cfg)
-            Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
+            Plugin.service.enter_mode = profile.get("enter_mode", "before_after")
+            Plugin.service.pre_key = profile.get("pre_key", TEXT_ENTRY_DEFAULT_PRE_KEY)
+            Plugin.service.post_key = profile.get("post_key", TEXT_ENTRY_DEFAULT_POST_KEY)
             Plugin.service.translate_to_english = bool(profile.get("translate_to_english", False))
             Plugin.service.remote_play_typing = bool(profile.get("remote_play_typing", False))
             Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
@@ -1591,7 +1715,9 @@ class Plugin:
             "last_error": Plugin.service.last_error,
             "debug_logging": Plugin.service.debug_logging,
             "steam_deck_button": profile.get("steam_deck_button", "L5"),
-            "enter_mode": profile.get("enter_mode", "pre_post"),
+            "enter_mode": profile.get("enter_mode", "before_after"),
+            "pre_key": profile.get("pre_key", TEXT_ENTRY_DEFAULT_PRE_KEY),
+            "post_key": profile.get("post_key", TEXT_ENTRY_DEFAULT_POST_KEY),
             "translate_to_english": bool(profile.get("translate_to_english", False)),
             "remote_play_typing": bool(profile.get("remote_play_typing", False)),
             "global": cfg["global"],
@@ -1632,9 +1758,7 @@ class Plugin:
 
     async def set_enter_mode(self, enter_mode: str):
         try:
-            mode = str(enter_mode or "pre_post")
-            if mode not in ENTER_MODE_OPTIONS:
-                mode = "pre_post"
+            mode = _normalize_enter_mode(enter_mode)
             cfg = Plugin._load_button_cfg()
             _profile, has_profile, app_key = Plugin._effective_profile(cfg)
             if has_profile and app_key:
@@ -1645,8 +1769,30 @@ class Plugin:
             Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.enter_mode = mode
             active_profile, _has_profile, _app_key = Plugin._effective_profile(cfg)
+            Plugin.service.pre_key = active_profile.get("pre_key", TEXT_ENTRY_DEFAULT_PRE_KEY)
+            Plugin.service.post_key = active_profile.get("post_key", TEXT_ENTRY_DEFAULT_POST_KEY)
             Plugin.service.transcription_provider = active_profile.get("transcription_profile", "Grok Whisper Large v3")
             return {"success": True, "enter_mode": mode}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def set_text_entry_key(self, key_name: str = "", position: str = "pre"):
+        try:
+            key_field = "post_key" if str(position or "").strip().lower() == "post" else "pre_key"
+            default_key = TEXT_ENTRY_DEFAULT_POST_KEY if key_field == "post_key" else TEXT_ENTRY_DEFAULT_PRE_KEY
+            normalized_key = _normalize_text_entry_key(key_name, default_key)
+            cfg = Plugin._load_button_cfg()
+            _profile, has_profile, app_key = Plugin._effective_profile(cfg)
+            if has_profile and app_key:
+                cfg["profiles"][app_key][key_field] = normalized_key
+            else:
+                cfg["global"][key_field] = normalized_key
+            Plugin._save_button_cfg(cfg)
+            active_profile, _has_profile, _app_key = Plugin._effective_profile(cfg)
+            Plugin.service.enter_mode = active_profile.get("enter_mode", "before_after")
+            Plugin.service.pre_key = active_profile.get("pre_key", TEXT_ENTRY_DEFAULT_PRE_KEY)
+            Plugin.service.post_key = active_profile.get("post_key", TEXT_ENTRY_DEFAULT_POST_KEY)
+            return {"success": True, key_field: normalized_key}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -1689,7 +1835,9 @@ class Plugin:
                 Plugin.service.enabled = Plugin._effective_enabled(cfg)
                 Plugin.service.active_app_id = str(cfg.get("active_app_id", "") or "")
                 Plugin.service.active_app_name = str(cfg.get("active_app_name", "") or "")
-                Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
+                Plugin.service.enter_mode = profile.get("enter_mode", "before_after")
+                Plugin.service.pre_key = profile.get("pre_key", TEXT_ENTRY_DEFAULT_PRE_KEY)
+                Plugin.service.post_key = profile.get("post_key", TEXT_ENTRY_DEFAULT_POST_KEY)
                 Plugin.service.translate_to_english = bool(profile.get("translate_to_english", False))
                 Plugin.service.remote_play_typing = bool(profile.get("remote_play_typing", False))
                 Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
@@ -1702,7 +1850,9 @@ class Plugin:
             Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.active_app_id = app_key
             Plugin.service.active_app_name = app_title
-            Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
+            Plugin.service.enter_mode = profile.get("enter_mode", "before_after")
+            Plugin.service.pre_key = profile.get("pre_key", TEXT_ENTRY_DEFAULT_PRE_KEY)
+            Plugin.service.post_key = profile.get("post_key", TEXT_ENTRY_DEFAULT_POST_KEY)
             Plugin.service.translate_to_english = bool(profile.get("translate_to_english", False))
             Plugin.service.remote_play_typing = bool(profile.get("remote_play_typing", False))
             Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
@@ -1737,7 +1887,9 @@ class Plugin:
             Plugin.service.enabled = Plugin._effective_enabled(cfg)
             Plugin.service.active_app_id = app_key
             Plugin.service.active_app_name = cfg["active_app_name"]
-            Plugin.service.enter_mode = profile.get("enter_mode", "pre_post")
+            Plugin.service.enter_mode = profile.get("enter_mode", "before_after")
+            Plugin.service.pre_key = profile.get("pre_key", TEXT_ENTRY_DEFAULT_PRE_KEY)
+            Plugin.service.post_key = profile.get("post_key", TEXT_ENTRY_DEFAULT_POST_KEY)
             Plugin.service.translate_to_english = bool(profile.get("translate_to_english", False))
             Plugin.service.remote_play_typing = bool(profile.get("remote_play_typing", False))
             Plugin.service.transcription_provider = profile.get("transcription_profile", "Grok Whisper Large v3")
